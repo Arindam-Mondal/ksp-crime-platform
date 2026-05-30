@@ -1,0 +1,5 @@
+{
+  "project_name": "ksp-crime-platform",
+  "project_id": 0,
+  "_comment": "project_id is populated by `catalyst init` once the project is linked to your Catalyst console. Do not commit a real project_id from a teammate's account."
+}
