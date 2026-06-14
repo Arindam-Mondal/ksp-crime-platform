@@ -32,6 +32,31 @@ export interface AskResponse {
   question: string; answer: string; provider: string; model: string; grounded_on: string[];
 }
 
+// --- Enriched analytics ---
+export interface Summary {
+  total_incidents: number; districts: number; crime_types: number;
+  clearance_rate: number; cyber_share: number; severe_share: number;
+  weapon_share: number; avg_fir_delay: number;
+  top_district: string | null; top_district_count: number;
+  top_crime: string | null; top_crime_count: number;
+}
+export interface CrimeTypeCount {
+  crime_type: string; crime_head: string; severity: string; count: number;
+}
+export interface CrimeHeadCount { crime_head: string; count: number; }
+export interface StatusCount { status: string; count: number; cleared: boolean; }
+export interface SeverityCount { severity: string; count: number; }
+export type MonthPoint = { month: string; total: number } & Record<string, number | string>;
+export interface GroupCount { group: string; count: number; }
+export interface GenderCount { gender: string; count: number; }
+export interface Demographics {
+  victim_age_groups: GroupCount[];
+  offender_age_groups: GroupCount[];
+  victim_gender: GenderCount[];
+  offender_gender: GenderCount[];
+  urban_rural: GroupCount[];
+}
+
 export const api = {
   health: () => get<{ status: string; data_mode: string; incidents_loaded: number }>("/health"),
   meta: () => get<{ districts: string[]; crime_types: string[] }>("/api/incidents/meta"),
@@ -43,4 +68,13 @@ export const api = {
   ego: (personId: string) => get<EgoGraph>(`/api/network/ego/${personId}`),
   riskScores: () => get<{ method: string; items: RiskScore[] }>("/api/predictive/risk-scores"),
   ask: (question: string) => post<AskResponse>("/api/assistant/ask", { question }),
+
+  // Enriched analytics
+  summary: () => get<Summary>("/api/analytics/summary"),
+  byCrimeType: () => get<{ items: CrimeTypeCount[] }>("/api/analytics/by-crime-type"),
+  byCrimeHead: () => get<{ items: CrimeHeadCount[] }>("/api/analytics/by-crime-head"),
+  byStatus: () => get<{ items: StatusCount[]; clearance_rate: number }>("/api/analytics/by-status"),
+  bySeverity: () => get<{ items: SeverityCount[] }>("/api/analytics/by-severity"),
+  byMonth: () => get<{ heads: string[]; items: MonthPoint[] }>("/api/analytics/by-month"),
+  demographics: () => get<Demographics>("/api/analytics/demographics"),
 };

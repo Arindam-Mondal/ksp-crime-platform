@@ -1,0 +1,34 @@
+[project]
+name = "ksp-api"
+version = "0.1.0"
+description = "KSP Crime Intelligence Platform — FastAPI backend (AppSail custom Docker runtime)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "gunicorn>=22.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scikit-learn>=1.5",
+    "networkx>=3.3",
+    # NOTE: zcatalyst-sdk is added when CatalystStore (ZCQL) is wired in Phase 0 deploy.
+    # It is intentionally omitted now since nothing imports it yet.
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",   # FastAPI TestClient
+    "ruff>=0.5",
+    "pytest>=8.0",
+]
+
+[tool.uv]
+# This is an application, not a distributable package — don't try to build/install it,
+# just manage the environment from the dependency list above.
+package = false
+
+[tool.ruff]
+line-length = 100

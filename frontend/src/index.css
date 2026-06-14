@@ -6,8 +6,97 @@ html, body, #root {
   height: 100%;
   margin: 0;
 }
+
 body {
-  background-color: #0b1220;
-  color: #e5e7eb;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background-color: #0a0e17;
+  color: #e6eaf2;
+  font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ambient "command surface": faint grid + two soft accent glows behind everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(900px 500px at 78% -8%, rgba(91, 127, 255, 0.12), transparent 60%),
+    radial-gradient(700px 500px at 0% 110%, rgba(56, 189, 248, 0.08), transparent 55%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* Numeric figures use the mono face + aligned columns */
+.tabular {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+::selection {
+  background: rgba(91, 127, 255, 0.32);
+  color: #fff;
+}
+
+/* Thin, themed scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2c3a5c transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #233052;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #324168;
+  background-clip: content-box;
+}
+
+/* Shimmer sweep for skeleton loaders */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #19223a;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.06),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* MapLibre attribution + controls blended into the dark theme */
+.maplibregl-ctrl-attrib {
+  background: rgba(10, 14, 23, 0.7) !important;
+  color: #8a94ad !important;
+}
+.maplibregl-ctrl-attrib a {
+  color: #b6c0d8 !important;
 }

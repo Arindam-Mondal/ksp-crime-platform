@@ -1,42 +1,124 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { TrendingUp, ShieldAlert, ArrowUpDown } from "lucide-react";
+import { api, RiskScore } from "../lib/api";
 import Panel from "../components/Panel";
+import PageHeader from "../components/PageHeader";
+import Badge from "../components/Badge";
+import { TableSkeleton } from "../components/Skeleton";
+
+type SortKey = "risk_score" | "incidents";
+
+function riskTier(score: number, max: number): { label: string; variant: "danger" | "warning" | "success" } {
+  const r = max ? score / max : 0;
+  if (r >= 0.66) return { label: "High", variant: "danger" };
+  if (r >= 0.33) return { label: "Medium", variant: "warning" };
+  return { label: "Low", variant: "success" };
+}
 
 export default function Predictive() {
   const risk = useQuery({ queryKey: ["riskScores"], queryFn: api.riskScores });
+  const [sort, setSort] = useState<SortKey>("risk_score");
+
   const items = risk.data?.items ?? [];
-  const max = items.length ? items[0].risk_score : 1;
+  const max = items.reduce((m, r) => Math.max(m, r.risk_score), 0) || 1;
+
+  const sorted = useMemo(
+    () => [...items].sort((a: RiskScore, b: RiskScore) => b[sort] - a[sort]),
+    [items, sort]
+  );
+
+  const highCount = items.filter((r) => riskTier(r.risk_score, max).label === "High").length;
+
+  const SortBtn = ({ k, children }: { k: SortKey; children: string }) => (
+    <button
+      onClick={() => setSort(k)}
+      className={`inline-flex items-center gap-1 transition-colors ${
+        sort === k ? "text-accent-soft" : "text-muted hover:text-white/80"
+      }`}
+    >
+      {children}
+      <ArrowUpDown size={12} />
+    </button>
+  );
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Predictive & Anomaly</h1>
-      <p className="text-xs text-white/40">{risk.data?.method}</p>
-      <Panel title="District risk ranking">
-        <table className="w-full text-sm">
-          <thead className="text-white/50 text-left">
-            <tr>
-              <th className="py-1">District</th>
-              <th>Incidents</th>
-              <th>SEI</th>
-              <th className="w-1/2">Risk</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((r) => (
-              <tr key={r.district} className="border-t border-white/5">
-                <td className="py-1">{r.district}</td>
-                <td>{r.incidents}</td>
-                <td>{r.socio_economic_index}</td>
-                <td>
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 rounded bg-ksp-danger" style={{ width: `${(r.risk_score / max) * 100}%` }} />
-                    <span className="text-white/60">{r.risk_score}</span>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="space-y-7">
+      <PageHeader
+        icon={TrendingUp}
+        eyebrow="Predictive & Anomaly AI"
+        title="District Risk Ranking"
+        subtitle={risk.data?.method ?? "Composite risk model over precomputed district statistics"}
+        actions={
+          items.length ? (
+            <Badge variant="danger" dot>
+              {highCount} high-risk
+            </Badge>
+          ) : undefined
+        }
+      />
+
+      <Panel icon={ShieldAlert} title="Risk-scored districts" subtitle="Sorted by composite risk model">
+        {risk.isPending ? (
+          <TableSkeleton rows={10} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
+                  <th className="py-2.5 pr-4 font-semibold">#</th>
+                  <th className="py-2.5 pr-4 font-semibold">District</th>
+                  <th className="py-2.5 pr-4 font-semibold">
+                    <SortBtn k="incidents">Incidents</SortBtn>
+                  </th>
+                  <th className="py-2.5 pr-4 font-semibold">SEI</th>
+                  <th className="py-2.5 pr-4 font-semibold">Tier</th>
+                  <th className="w-2/5 py-2.5 font-semibold">
+                    <SortBtn k="risk_score">Risk score</SortBtn>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((r, i) => {
+                  const tier = riskTier(r.risk_score, max);
+                  return (
+                    <tr
+                      key={r.district}
+                      className="border-b border-line/60 transition-colors hover:bg-white/[0.025]"
+                    >
+                      <td className="tabular py-2.5 pr-4 text-muted">{String(i + 1).padStart(2, "0")}</td>
+                      <td className="py-2.5 pr-4 font-medium text-white/90">{r.district}</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.incidents.toLocaleString()}</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.socio_economic_index}</td>
+                      <td className="py-2.5 pr-4">
+                        <Badge variant={tier.variant}>{tier.label}</Badge>
+                      </td>
+                      <td className="py-2.5">
+                        <div className="flex items-center gap-3">
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-bg/80">
+                            <div
+                              className={`h-full rounded-full ${
+                                tier.variant === "danger"
+                                  ? "bg-gradient-to-r from-danger/60 to-danger"
+                                  : tier.variant === "warning"
+                                  ? "bg-gradient-to-r from-warning/60 to-warning"
+                                  : "bg-gradient-to-r from-success/60 to-success"
+                              }`}
+                              style={{ width: `${(r.risk_score / max) * 100}%` }}
+                            />
+                          </div>
+                          <span className="tabular w-12 shrink-0 text-right text-white/80">
+                            {r.risk_score.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
     </div>
   );
