@@ -39,6 +39,10 @@ import {
   STATUS_COLORS,
 } from "../components/charts/theme";
 
+// SVG gradient ids must be reference-safe: crime-head names contain spaces and "&",
+// which break the url(#…) fill reference and make the area render black.
+const gradId = (head: string) => "trend-" + head.replace(/[^a-zA-Z0-9]/g, "");
+
 export default function Dashboard() {
   const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary });
   const byDistrict = useQuery({ queryKey: ["byDistrict"], queryFn: api.byDistrict });
@@ -103,9 +107,9 @@ export default function Dashboard() {
               <AreaChart data={byMonth.data?.items ?? []} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
                 <defs>
                   {(byMonth.data?.heads ?? []).map((h) => (
-                    <linearGradient key={h} id={`g-${h}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={HEAD_COLORS[h] ?? CHART.accent} stopOpacity={0.5} />
-                      <stop offset="100%" stopColor={HEAD_COLORS[h] ?? CHART.accent} stopOpacity={0.03} />
+                    <linearGradient key={h} id={gradId(h)} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={HEAD_COLORS[h] ?? CHART.accent} stopOpacity={0.45} />
+                      <stop offset="100%" stopColor={HEAD_COLORS[h] ?? CHART.accent} stopOpacity={0.02} />
                     </linearGradient>
                   ))}
                 </defs>
@@ -121,8 +125,8 @@ export default function Dashboard() {
                     dataKey={h}
                     stackId="1"
                     stroke={HEAD_COLORS[h] ?? CHART.accent}
-                    strokeWidth={1.5}
-                    fill={`url(#g-${h})`}
+                    strokeWidth={2}
+                    fill={`url(#${gradId(h)})`}
                   />
                 ))}
               </AreaChart>

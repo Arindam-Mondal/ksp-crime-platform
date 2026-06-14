@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import Hotspots from "./pages/Hotspots";
 import Demographics from "./pages/Demographics";
 import Network from "./pages/Network";
+import PersonProfile from "./pages/PersonProfile";
 import Predictive from "./pages/Predictive";
 import Assistant from "./pages/Assistant";
 
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="hotspots" element={<Hotspots />} />
         <Route path="demographics" element={<Demographics />} />
         <Route path="network" element={<Network />} />
+        <Route path="person/:id" element={<PersonProfile />} />
         <Route path="predictive" element={<Predictive />} />
         <Route path="assistant" element={<Assistant />} />
         <Route path="*" element={<Navigate to="/" replace />} />
