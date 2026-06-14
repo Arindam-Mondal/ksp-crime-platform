@@ -1,0 +1,13 @@
+{
+  "deployment": {
+    "name": "risk_job",
+    "type": "cron",
+    "stack": "python3.9",
+    "memory": 1024,
+    "timeout": 900
+  },
+  "execution": {
+    "main": "main.handler"
+  },
+  "_comment": "Cron. Writes risk_scores + anomalies. Reconcile via `catalyst functions:add`."
+}

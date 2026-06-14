@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     quickml_api_key: str = ""
     quickml_model: str = "qwen2.5-14b-instruct"
 
+    # Report PDF export (catalyst mode → SmartBrowz HTML→PDF stored in Stratus).
+    # Empty = local mode: the API returns JSON and the frontend prints to PDF.
+    smartbrowz_endpoint: str = ""
+    smartbrowz_api_key: str = ""
+    stratus_bucket: str = ""
+
     # CORS for local dev (Vite default port).
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 

@@ -43,17 +43,50 @@ class LocalCsvStore(DataStore):
 
 
 class CatalystStore(DataStore):
-    """Catalyst Data Store via ZCQL. Wired during Phase 0 deployment.
+    """Catalyst Data Store via ZCQL.
 
-    Remember the hard limit: max 300 rows per ZCQL query -> paginate, and prefer
-    SELECTing precomputed aggregate tables over scanning `incidents`.
+    Respects the 300-rows-per-query cap by paging on ROWID. In production this reads
+    the small *aggregate* tables the Cron jobs write (hotspot_cells, district_stats,
+    risk_scores, anomalies, alerts, graph_edges) — never a full scan of `incidents`
+    on the request path.
+
+    Deploy note: validated against the documented zcatalyst-sdk API; not runnable
+    locally (needs a Catalyst context). Use DATA_MODE=local for dev.
     """
 
+    PAGE = 300
+
+    def __init__(self):
+        try:
+            import zcatalyst_sdk  # noqa: F401
+            self._sdk = zcatalyst_sdk
+        except ImportError as e:  # pragma: no cover
+            raise RuntimeError(
+                "zcatalyst-sdk not installed. Add it to pyproject and run inside AppSail, "
+                "or set DATA_MODE=local."
+            ) from e
+
     def rows(self, table: str) -> list[dict[str, Any]]:
-        raise NotImplementedError(
-            "CatalystStore is not wired yet. Use DATA_MODE=local for now, "
-            "or implement the zcatalyst-sdk ZCQL query here in Phase 0 deploy."
-        )
+        app = self._sdk.initialize()
+        zcql = app.zcql()
+        out: list[dict[str, Any]] = []
+        last = 0
+        while True:
+            page = zcql.execute_query(
+                f"SELECT * FROM {table} WHERE ROWID > {last} ORDER BY ROWID LIMIT {self.PAGE}"
+            )
+            if not page:
+                break
+            for r in page:
+                row = r.get(table, r)  # ZCQL nests columns under the table name
+                out.append(row)
+                try:
+                    last = max(last, int(row.get("ROWID", last) or last))
+                except (TypeError, ValueError):
+                    pass
+            if len(page) < self.PAGE:
+                break
+        return out
 
 
 @lru_cache

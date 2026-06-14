@@ -1,0 +1,13 @@
+{
+  "deployment": {
+    "name": "graph_job",
+    "type": "cron",
+    "stack": "python3.9",
+    "memory": 1024,
+    "timeout": 900
+  },
+  "execution": {
+    "main": "main.handler"
+  },
+  "_comment": "Cron or Event (on incident_persons insert via Signals). Writes graph_edges. Reconcile via `catalyst functions:add`."
+}

@@ -57,10 +57,43 @@ class QuickMLProvider(LLMProvider):
         self.model = model
 
     def complete(self, prompt: str, context: list[str] | None = None) -> LLMResult:
-        raise NotImplementedError(
-            "QuickMLProvider not wired yet. Set LLM_PROVIDER=quickml and implement the "
-            "HTTP call to QUICKML_ENDPOINT in Phase 4."
+        """POST to a Catalyst QuickML LLM Serving endpoint (RAG-grounded).
+
+        Deploy note: keep prompts small (budget). The request/response shape below is
+        the documented QuickML serving contract; validate against your endpoint. Not
+        runnable locally — use LLM_PROVIDER=mock for dev.
+        """
+        import httpx
+
+        ctx = context or []
+        grounding = "\n".join(f"- {c}" for c in ctx[:5])
+        system = (
+            "You are a crime-intelligence analyst for the Karnataka State Police. "
+            "Answer concisely and only from the provided context."
         )
+        user = prompt if not grounding else f"{prompt}\n\nContext:\n{grounding}"
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": 400,
+            "temperature": 0.2,
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        with httpx.Client(timeout=25) as client:
+            resp = client.post(self.endpoint, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        # tolerate OpenAI-style or {output/text} shapes
+        text = (
+            (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+            or data.get("output")
+            or data.get("text")
+            or ""
+        ).strip()
+        return LLMResult(text=text, provider="quickml", model=self.model, grounded_on=ctx[:5])
 
 
 @lru_cache

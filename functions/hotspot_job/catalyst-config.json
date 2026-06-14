@@ -1,0 +1,13 @@
+{
+  "deployment": {
+    "name": "hotspot_job",
+    "type": "cron",
+    "stack": "python3.9",
+    "memory": 512,
+    "timeout": 900
+  },
+  "execution": {
+    "main": "main.handler"
+  },
+  "_comment": "Cron (nightly). Reconcile this file against your project with `catalyst functions:add` — the CLI owns the canonical schema. timeout is the 15-min (900s) Cron limit."
+}

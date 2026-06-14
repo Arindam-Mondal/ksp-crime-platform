@@ -139,7 +139,26 @@ npm i -g zcatalyst-cli      # install the Catalyst CLI (once)
 catalyst login
 catalyst init               # link this repo to your Catalyst project
 catalyst appsail:init       # backend: choose "custom runtime" and point at backend/Dockerfile
+
+# Cron/Event precompute jobs (heavy math → aggregate tables)
+catalyst functions:add      # reconcile each functions/<job>/catalyst-config.json
 catalyst deploy
 ```
+
+After the first deploy, seed the Data Store and let the jobs populate the aggregate tables:
+
+```powershell
+# create the core + aggregate tables (console schema import), then:
+py backend/scripts/seed_datastore.py --data data/output
+# run hotspot_job / risk_job / graph_job from the Catalyst console (or wait for their cron)
+```
+
+Then flip the backend to read aggregates: set `DATA_MODE=catalyst` (and, once QuickML
+early-access is on, `LLM_PROVIDER=quickml` + `QUICKML_ENDPOINT`/key) in the AppSail env.
+Local dev stays on `DATA_MODE=local` / `LLM_PROVIDER=mock` (no Catalyst needed).
+
+> The Catalyst code paths (`CatalystStore` ZCQL, `QuickMLProvider`, SmartBrowz PDF, and the
+> `functions/` jobs) are written deploy-ready but can only be validated in a live Catalyst
+> project — see `functions/README.md` for the per-job deploy notes.
 
 See [`CLAUDE.md`](./CLAUDE.md) for the full architecture, conventions, and the phased build plan.

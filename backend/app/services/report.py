@@ -115,8 +115,24 @@ def build_report(scope: str = "state", subject_id: str | None = None) -> dict:
 
 
 def render_pdf(html: str) -> bytes:  # pragma: no cover - Catalyst-only
-    """SmartBrowz HTML→PDF hook (wired at deploy). Locally the client prints to PDF."""
-    raise NotImplementedError(
-        "render_pdf uses Catalyst SmartBrowz; set DATA_MODE=catalyst and wire the "
-        "SmartBrowz call at deploy. Locally the frontend uses window.print()."
-    )
+    """SmartBrowz HTML→PDF (wired at deploy). Locally the client prints to PDF instead.
+
+    Deploy note: validate the SmartBrowz request shape against your endpoint; the caller
+    should upload the returned bytes to Stratus and hand the URL back to the client.
+    """
+    from app.config import get_settings
+
+    s = get_settings()
+    if not s.smartbrowz_endpoint:
+        raise NotImplementedError(
+            "SMARTBROWZ_ENDPOINT not set — local mode returns JSON and the frontend uses "
+            "window.print(). Set it (and DATA_MODE=catalyst) to enable server-side PDF."
+        )
+    import httpx
+
+    payload = {"html": html, "output": "pdf", "page": {"format": "A4", "margin": "16mm"}}
+    headers = {"Authorization": f"Bearer {s.smartbrowz_api_key}"}
+    with httpx.Client(timeout=40) as client:
+        resp = client.post(s.smartbrowz_endpoint, json=payload, headers=headers)
+        resp.raise_for_status()
+        return resp.content

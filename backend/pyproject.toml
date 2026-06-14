@@ -14,8 +14,8 @@ dependencies = [
     "numpy>=1.26",
     "scikit-learn>=1.5",
     "networkx>=3.3",
-    # NOTE: zcatalyst-sdk is added when CatalystStore (ZCQL) is wired in Phase 0 deploy.
-    # It is intentionally omitted now since nothing imports it yet.
+    "httpx>=0.27",          # QuickML + SmartBrowz HTTP calls (lazy-imported in services/)
+    "zcatalyst-sdk>=1.0",   # Catalyst Data Store ZCQL; lazy-imported, only used when DATA_MODE=catalyst
 ]
 
 [dependency-groups]
