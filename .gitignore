@@ -35,3 +35,7 @@ data/output/*
 .DS_Store
 Thumbs.db
 *.log
+
+# Backend image data bundle (populated by deploy prep)
+backend/_seed_data/*
+!backend/_seed_data/.gitkeep

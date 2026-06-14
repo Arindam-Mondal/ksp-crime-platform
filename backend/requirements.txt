@@ -9,3 +9,7 @@ pandas==2.2.2
 numpy==1.26.4
 scikit-learn==1.5.0
 networkx==3.3
+# QuickML + SmartBrowz HTTP calls (lazy-imported in services/)
+httpx==0.27.0
+# Catalyst Data Store ZCQL (lazy-imported; only used when DATA_MODE=catalyst)
+zcatalyst-sdk==1.0.0

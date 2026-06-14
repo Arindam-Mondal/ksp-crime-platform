@@ -1,13 +1,17 @@
-// Typed API client. In dev, Vite proxies these paths to the FastAPI backend (:9000).
+// Typed API client.
+// - Dev: leave VITE_API_BASE unset → relative paths, Vite proxies /api + /health to :9000.
+// - Prod (SPA on Slate, API on AppSail): set VITE_API_BASE to the API origin at build time,
+//   e.g. VITE_API_BASE=https://<project>.catalystserverless.com  (or your API Gateway URL).
+const API_BASE = String(((import.meta as any).env?.VITE_API_BASE ?? "")).replace(/\/$/, "");
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(API_BASE + path);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
