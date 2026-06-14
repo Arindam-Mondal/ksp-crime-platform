@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 
 from fastapi import APIRouter
 
+from app.services import aggregations
 from app.services.datastore import get_store
 
 router = APIRouter(prefix="/api/hotspots", tags=["hotspots"])
@@ -38,6 +39,21 @@ def cells(precision: int = 2):
     cells = [{"lat": lat, "lon": lon, "count": c} for (lat, lon), c in grid.items()]
     cells.sort(key=lambda x: x["count"], reverse=True)
     return {"precision": precision, "items": cells[:500]}
+
+
+@router.get("/districts")
+def districts():
+    """Per-district choropleth metrics (incidents, SEI, risk, centroid)."""
+    store = get_store()
+    items = aggregations.district_stats(store.rows("incidents"), store.rows("locations"))
+    return {"items": items}
+
+
+@router.get("/stations")
+def stations(district: str):
+    """District drill-down: station counts, top crime types, hourly profile."""
+    store = get_store()
+    return aggregations.station_breakdown(store.rows("incidents"), store.rows("locations"), district)
 
 
 @router.get("/by-hour")

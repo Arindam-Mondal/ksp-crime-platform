@@ -11,6 +11,7 @@ from collections import Counter
 
 from fastapi import APIRouter
 
+from app.services import aggregations
 from app.services.datastore import get_store
 
 router = APIRouter(prefix="/api/predictive", tags=["predictive"])
@@ -39,3 +40,11 @@ def risk_scores():
                       "socio_economic_index": round(avg_sei, 3), "risk_score": score})
     items.sort(key=lambda x: x["risk_score"], reverse=True)
     return {"method": "heuristic-placeholder (Phase 3 replaces with Zia AutoML)", "items": items}
+
+
+@router.get("/anomalies")
+def anomalies():
+    """Statistical anomaly call-outs (Phase 3). Local mode derives them on the fly;
+    production serves the precomputed `anomalies` table written by the risk job."""
+    items = aggregations.anomalies(get_store().rows("incidents"))
+    return {"method": "z-score outliers (volume & temporal)", "count": len(items), "items": items}

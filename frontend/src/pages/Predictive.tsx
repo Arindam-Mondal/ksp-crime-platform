@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { TrendingUp, ShieldAlert, ArrowUpDown } from "lucide-react";
+import { TrendingUp, ShieldAlert, ArrowUpDown, Radar, Clock, BarChart2 } from "lucide-react";
 import { api, RiskScore } from "../lib/api";
 import Panel from "../components/Panel";
 import PageHeader from "../components/PageHeader";
 import Badge from "../components/Badge";
-import { TableSkeleton } from "../components/Skeleton";
+import { TableSkeleton, ListSkeleton } from "../components/Skeleton";
 
 type SortKey = "risk_score" | "incidents";
 
@@ -16,8 +16,15 @@ function riskTier(score: number, max: number): { label: string; variant: "danger
   return { label: "Low", variant: "success" };
 }
 
+const SEV_VARIANT: Record<string, "danger" | "warning" | "info"> = {
+  High: "danger",
+  Medium: "warning",
+  Low: "info",
+};
+
 export default function Predictive() {
   const risk = useQuery({ queryKey: ["riskScores"], queryFn: api.riskScores });
+  const anomalies = useQuery({ queryKey: ["anomalies"], queryFn: api.anomalies });
   const [sort, setSort] = useState<SortKey>("risk_score");
 
   const items = risk.data?.items ?? [];
@@ -118,6 +125,43 @@ export default function Predictive() {
               </tbody>
             </table>
           </div>
+        )}
+      </Panel>
+
+      {/* Anomaly call-outs */}
+      <Panel
+        icon={Radar}
+        title="Anomaly call-outs"
+        subtitle="Statistical outliers — volume spikes & unusual timing"
+        actions={
+          anomalies.data ? <Badge variant="warning" dot>{anomalies.data.count} flagged</Badge> : undefined
+        }
+      >
+        {anomalies.isPending ? (
+          <ListSkeleton rows={5} />
+        ) : (anomalies.data?.items.length ?? 0) === 0 ? (
+          <p className="py-6 text-center text-sm text-muted">No anomalies detected in the current window.</p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {anomalies.data!.items.map((a, i) => {
+              const Icon = a.kind === "temporal" ? Clock : BarChart2;
+              return (
+                <li key={i} className="flex items-start gap-3 rounded-xl border border-line bg-bg/30 px-4 py-3">
+                  <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface-2 text-accent-soft">
+                    <Icon size={15} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-white/90">{a.subject}</span>
+                      <Badge variant="neutral">{a.period}</Badge>
+                    </div>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted">{a.description}</p>
+                  </div>
+                  <Badge variant={SEV_VARIANT[a.severity] ?? "neutral"}>{a.z}σ</Badge>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </Panel>
     </div>

@@ -6,6 +6,7 @@ import Demographics from "./pages/Demographics";
 import Network from "./pages/Network";
 import PersonProfile from "./pages/PersonProfile";
 import Predictive from "./pages/Predictive";
+import Reports from "./pages/Reports";
 import Assistant from "./pages/Assistant";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="network" element={<Network />} />
         <Route path="person/:id" element={<PersonProfile />} />
         <Route path="predictive" element={<Predictive />} />
+        <Route path="reports" element={<Reports />} />
         <Route path="assistant" element={<Assistant />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

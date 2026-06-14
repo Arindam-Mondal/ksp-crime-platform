@@ -6,6 +6,7 @@ import {
   Users,
   Share2,
   TrendingUp,
+  FileText,
   Sparkles,
   ShieldHalf,
   LucideIcon,
@@ -18,6 +19,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/demographics", label: "Demographics", icon: Users },
   { to: "/network", label: "Network / Link Analysis", icon: Share2 },
   { to: "/predictive", label: "Predictive & Anomaly", icon: TrendingUp },
+  { to: "/reports", label: "AI Reports", icon: FileText },
   { to: "/assistant", label: "Ask the Data", icon: Sparkles },
 ];
 
@@ -28,7 +30,7 @@ export default function Layout() {
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface/60 backdrop-blur-xl">
+      <aside className="no-print flex w-64 shrink-0 flex-col border-r border-line bg-surface/60 backdrop-blur-xl">
         {/* Brand */}
         <div className="flex items-center gap-3 px-5 py-5">
           <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-accent to-info text-white shadow-glow">

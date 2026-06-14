@@ -92,6 +92,53 @@ body::before {
   }
 }
 
+/* Print: render only the report sheet (used by the Reports page → PDF) */
+@media print {
+  body { background: #fff !important; }
+  body::before { display: none !important; }
+  .no-print { display: none !important; }
+  .print-sheet {
+    position: absolute !important;
+    inset: 0 !important;
+    margin: 0 !important;
+    padding: 24px 28px !important;
+    color: #0a0e17 !important;
+    background: #fff !important;
+  }
+  .print-sheet * { color: #111 !important; }
+  .print-muted { color: #555 !important; }
+}
+
+/* Pulsing "red-zone" markers for emerging-trend spike alerts on the map */
+.map-pulse {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #ef4444;
+  position: relative;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.7);
+}
+.map-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid #ef4444;
+  animation: mapPulse 1.7s ease-out infinite;
+}
+.map-pulse.warning {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+.map-pulse.warning::after {
+  border-color: #f59e0b;
+}
+@keyframes mapPulse {
+  0% { transform: scale(1); opacity: 0.85; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+
 /* MapLibre attribution + controls blended into the dark theme */
 .maplibregl-ctrl-attrib {
   background: rgba(10, 14, 23, 0.7) !important;

@@ -65,6 +65,38 @@ export interface RelationshipShared {
   id: string; crime_type: string; severity: string; district: string; datetime: string; status: string;
 }
 export interface Relationship { a: string; b: string; shared: RelationshipShared[] }
+
+// --- Alerts / anomalies / district drill-down ---
+export interface SpikeAlert {
+  district: string; crime_type: string; recent: number; baseline: number;
+  ratio: number; z: number; severity: string; lat: number | null; lon: number | null; last_seen: string;
+}
+export interface Anomaly {
+  kind: string; subject: string; period: string; observed: number;
+  expected: number; z: number; severity: string; description: string;
+}
+export interface DistrictStat {
+  district: string; incidents: number; socio_economic_index: number; risk_score: number;
+  population: number | null; urban_rural: string; lat: number | null; lon: number | null;
+}
+export interface StationBreakdown {
+  district: string; total: number;
+  stations: { station: string; incidents: number; lat: number | null; lon: number | null }[];
+  by_type: NameCount[];
+  by_hour: HourCount[];
+}
+
+// --- AI intelligence report ---
+export interface ReportKpi { label: string; value: string }
+export interface IntelReport {
+  scope: string; subject: string; subject_id: string | null; generated_at: string;
+  narrative: string; provider: string; model: string;
+  kpis: ReportKpi[];
+  hotspots: { district: string; incidents: number; risk_score: number }[];
+  offenders: { person_id: string; name: string; incidents: number }[];
+  alerts: SpikeAlert[];
+  anomalies: Anomaly[];
+}
 export interface AskResponse {
   question: string; answer: string; provider: string; model: string; grounded_on: string[];
 }
@@ -116,4 +148,12 @@ export const api = {
   bySeverity: () => get<{ items: SeverityCount[] }>("/api/analytics/by-severity"),
   byMonth: () => get<{ heads: string[]; items: MonthPoint[] }>("/api/analytics/by-month"),
   demographics: () => get<Demographics>("/api/analytics/demographics"),
+
+  // Alerts, anomalies, district drill-down
+  spikes: () => get<{ count: number; items: SpikeAlert[] }>("/api/alerts/spikes"),
+  anomalies: () => get<{ method: string; count: number; items: Anomaly[] }>("/api/predictive/anomalies"),
+  districts: () => get<{ items: DistrictStat[] }>("/api/hotspots/districts"),
+  stations: (district: string) =>
+    get<StationBreakdown>(`/api/hotspots/stations?district=${encodeURIComponent(district)}`),
+  report: (scope: string, id?: string) => post<IntelReport>("/api/report", { scope, id }),
 };

@@ -22,11 +22,15 @@ import {
   TrendingUp,
   ListChecks,
   PieChart as PieIcon,
+  Siren,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import Panel from "../components/Panel";
 import StatCard from "../components/StatCard";
 import PageHeader from "../components/PageHeader";
+import AlertsFeed from "../components/AlertsFeed";
+import Badge from "../components/Badge";
 import { ChartSkeleton, Skeleton } from "../components/Skeleton";
 import DonutChart from "../components/charts/DonutChart";
 import {
@@ -50,6 +54,7 @@ export default function Dashboard() {
   const byMonth = useQuery({ queryKey: ["byMonth"], queryFn: api.byMonth });
   const byStatus = useQuery({ queryKey: ["byStatus"], queryFn: api.byStatus });
   const byCrimeHead = useQuery({ queryKey: ["byCrimeHead"], queryFn: api.byCrimeHead });
+  const spikes = useQuery({ queryKey: ["spikes"], queryFn: api.spikes });
 
   const s = summary.data;
   const topDistricts = (byDistrict.data?.items ?? []).slice(0, 12);
@@ -63,6 +68,31 @@ export default function Dashboard() {
         title="Strategic Intelligence Hub"
         subtitle="Live operational picture across the State Crime Records Bureau"
       />
+
+      {/* Emerging-trend spike alerts */}
+      <Panel
+        icon={Siren}
+        title="Active spike alerts"
+        subtitle="Crime categories surging above their historical baseline"
+        actions={
+          spikes.data ? (
+            <Link to="/hotspots">
+              <Badge variant={spikes.data.count ? "danger" : "success"} dot>
+                {spikes.data.count} active
+              </Badge>
+            </Link>
+          ) : undefined
+        }
+      >
+        {spikes.isPending ? (
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+        ) : (
+          <AlertsFeed items={spikes.data?.items ?? []} limit={6} />
+        )}
+      </Panel>
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

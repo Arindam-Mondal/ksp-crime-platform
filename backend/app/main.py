@@ -10,7 +10,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import analytics, assistant, health, hotspots, incidents, network, predictive
+from app.routers import (
+    alerts,
+    analytics,
+    assistant,
+    health,
+    hotspots,
+    incidents,
+    network,
+    predictive,
+    report,
+)
 
 settings = get_settings()
 
@@ -37,6 +47,8 @@ app.include_router(network.router)
 app.include_router(predictive.router)
 app.include_router(assistant.router)
 app.include_router(analytics.router)
+app.include_router(alerts.router)
+app.include_router(report.router)
 
 
 @app.get("/")
