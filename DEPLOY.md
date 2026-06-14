@@ -1,138 +1,233 @@
-# Deploying to Zoho Catalyst — runbook
+# Deploying KSP Crime Intelligence Platform to Zoho Catalyst
 
-Goes from "account, no project" to a **live backend + frontend**, then connects the
-**real QuickML model**, then (phase 2) the Data Store + Cron Functions.
+A step-by-step guide from "Catalyst account, no project" to a **live backend + frontend**,
+then connecting the **real QuickML model**, then (phase 2) the **Data Store + Cron Functions**.
 
-Legend: 🧑 = you run it (interactive / needs your account); 🤖 = already prepared in the repo.
-Tip: run the 🧑 shell steps from this session with a leading `!` so the output lands here.
+> Commands/flows here are based on the current Catalyst CLI v1 + AppSail custom-runtime docs
+> (see Sources at the bottom). The CLI is interactive — follow its prompts; values in
+> `<angle brackets>` are yours to fill in.
 
----
-
-## 0. Prerequisites
-- ✅ Zoho Catalyst account (you have one).
-- ✅ Node 18+ (you have v24).
-- **Docker Desktop running** — required to build the backend image (the daemon was off when I checked; start it before step 3).
-- 🤖 Repo is deploy-ready: `backend/Dockerfile` (bundles data), `backend/app-config.json`, `catalyst.json`, the `functions/` jobs, and `frontend/dist`.
-
-## 1. Install the CLI + log in   🧑
-```powershell
-npm i -g zcatalyst-cli
-catalyst login        # opens a browser; pick the same DC/region as your Zoho account
-```
-
-## 2. Create + link the project   🧑
-1. In the **Catalyst console** (console.catalyst.zoho.com) → **Create Project** → name it `ksp-crime-platform`. Copy its **Project ID**.
-2. Link this repo:
-```powershell
-catalyst init         # select the existing project; enable AppSail + Functions + Client hosting
-```
-This writes the real `project_id` into `catalyst.json` (it's `0` now — never commit a real one to a shared repo).
+**Legend:** 🧑 = you run it (needs your account / interactive) · 🤖 = already prepared in this repo.
+In this chat you can prefix a shell step with `!` to run it here and capture the output.
 
 ---
 
-## 3. Deploy the backend (AppSail, custom Docker)   🧑
-The image is **Python 3.12 + uv**, and bundles the synthetic CSVs so the live API has data immediately in `DATA_MODE=local` (phase 1).
+## 0 · Prerequisites
+| Need | Status |
+|---|---|
+| Zoho Catalyst account | ✅ you have one |
+| Node 18+ | ✅ v24 |
+| **Docker Desktop running** | ⚠️ start it — required to build the backend image (was off when I checked) |
+| Repo deploy-ready | 🤖 `backend/Dockerfile` (bundles data, honors Catalyst's port), `functions/` jobs, `frontend/dist`, `catalyst.json` |
 
+> **Platform note:** Catalyst custom runtimes accept **OCI images built for `linux/amd64`** only.
+> Your Windows machine is x86-64, so a normal `docker build` produces amd64 — fine.
+
+---
+
+## 1 · Install the CLI & log in   🧑
 ```powershell
-# 3a. Bundle the dataset into the image build context (one-time / whenever data changes)
+npm install -g zcatalyst-cli
+catalyst login --dc in        # pick your account's data center: us | eu | in | au | jp | sa | ca
+catalyst whoami               # confirms the logged-in email
+```
+> KSP/Karnataka data usually lives in the **India (`in`)** DC — use the DC your Zoho account was created in.
+
+## 2 · Create & link the project   🧑
+1. In the **Catalyst console** (`https://console.catalyst.zoho.com`) → **Create Project** → name it `ksp-crime-platform`.
+2. From the repo root, link it:
+```powershell
+catalyst project:list                 # see your projects + IDs
+catalyst init                         # choose "use existing project" → ksp-crime-platform
+#   (or, non-interactively:)  catalyst project:use ksp-crime-platform
+```
+`catalyst.json` gets your real `project_id` (it's `0` in the repo — never commit a real one).
+
+---
+
+## 3 · Deploy the backend (AppSail · custom Docker runtime)   🧑
+
+The image is **Python 3.12 + uv + gunicorn**; it **bundles the synthetic CSVs** and defaults to
+`DATA_MODE=local` so the live API has data immediately (phase 1). It listens on
+`$X_ZOHO_CATALYST_LISTEN_PORT` (Catalyst injects this), falling back to 9000.
+
+**3a. Bundle the dataset into the build context** (whenever data changes):
+```powershell
 py data/generator/generate_synthetic.py --incidents 20000 --seed 42
 Copy-Item data/output/*.csv backend/_seed_data/
-
-# 3b. (recommended) verify the image locally first — needs Docker Desktop running
-docker build -t ksp-api:test backend
-docker run --rm -p 9000:9000 ksp-api:test
-#   → in another shell: curl http://localhost:9000/health   (expect incidents_loaded: 20000)
-
-# 3c. deploy to AppSail
-catalyst appsail:init     # choose "custom runtime" → point at backend/Dockerfile, port 9000
-catalyst deploy           # or: catalyst appsail:deploy
 ```
-AppSail prints the **API URL** (e.g. `https://ksp-crime-platform-<id>.development.catalystserverless.com`). Save it — the frontend needs it.
 
-> Verified for you: `uv.lock` resolves the new deps (`httpx`, `zcatalyst-sdk`) and the backend imports clean. Not verifiable here: the live AppSail build/run (needs your project).
-
-## 4. Deploy the frontend (Web Client Hosting)   🧑
-The SPA must call the AppSail API by absolute URL in production (no Vite proxy live).
-
+**3b. Build the image** (with Docker Desktop running):
 ```powershell
-cd frontend
-# point the build at the API URL from step 3c:
-"VITE_API_BASE=https://<your-api-url>" | Out-File -Encoding utf8 .env.production
-npm install ; npm run build      # outputs frontend/dist
-
-# add a web client via the CLI and serve dist:
-catalyst init                    # if not already added: choose "Client" → set the serve dir to frontend/dist
-catalyst deploy
+docker build -t ksp-api:latest backend
+# optional local sanity check:
+docker run --rm -p 9000:9000 ksp-api:latest
+#   curl http://localhost:9000/health   → expect {"incidents_loaded":20000}
 ```
-**SPA routing gotcha:** the app uses client-side routes (`/network`, `/person/:id`, …). Configure the hosting to serve `index.html` for unknown paths (404-fallback / URL-rewrite to `/index.html`) — set it in the client config or the console, or react-router deep links will 404.
 
-**CORS:** the API already allows `localhost:5173`. Add your hosted frontend origin to `cors_origins` in `backend/app/config.py` (or set it via env) and redeploy the backend.
+**3c. Initialize the AppSail service for this image & deploy:**
+```powershell
+catalyst appsail:add
+#   Prompt 1 (runtime):  Docker Image  (NOT a Catalyst-managed runtime)
+#   Prompt 2 (protocol): Docker Image
+#   Prompt 3 (image):    select  ksp-api:latest  from the local list
+#   Prompt 4 (name):     ksp-api
+#   Port:                9000
+catalyst deploy appsail
+```
+> For container images **no `app-config.json` is generated** — the spec is written into
+> `catalyst.json`. (`backend/app-config.json` in the repo is only for the *managed*-runtime
+> alternative; the Docker path ignores it.)
+>
+> Equivalent one-liner: `catalyst deploy appsail --name ksp-api --source docker://localhost/ksp-api:latest --port 9000`
 
-## 5. Smoke test (live)   🧑
-- Open the hosted frontend URL → Dashboard loads, alerts feed populates, map renders.
-- `curl https://<api-url>/health` → `incidents_loaded: 20000`.
-- Walk Hotspots / Network / Predictive / Reports / Ask the Data.
+**3d. Set the backend env** (console → **AppSail → ksp-api → Configuration → Environment**):
+```
+DATA_MODE=local
+LLM_PROVIDER=mock
+```
+Redeploy if you change env. AppSail prints the **API URL**, e.g.
+`https://ksp-api-<id>.<dc>.catalystserverless.com` — copy it for step 4.
 
-At this point **backend + frontend are live** (mock LLM). Now connect the real model.
+**3e. Verify:** `curl https://<api-url>/health` → `incidents_loaded: 20000`, and `/docs` loads.
+
+> Verified for you locally: `uv.lock` resolves the new deps (`httpx`, `zcatalyst-sdk`) and the
+> backend imports clean. The live AppSail build/run needs your project (can't be tested here).
 
 ---
 
-## 6. Enable QuickML + connect the real model   🧑  ← what you asked about
-QuickML LLM Serving is the **Catalyst-compliant** model path (keeps you inside the rules + credits).
+## 4 · Deploy the frontend (Web Client Hosting)   🧑
 
-1. **Enable / request access.** In the console → your project → **QuickML** (under AI/ML).
-   If it's gated, use the in-console **"Request early access"** for *LLM Serving*; it's approved per-account. (This is the one budget unknown — pricing is undisclosed, so spin it up only for dev/demo and **tear it down when idle**.)
-2. **Deploy a serving model.** QuickML → **LLM Serving** → **Deploy/Serve a model** → pick **Qwen 2.5 14B Instruct** (matches `QUICKML_MODEL`). Wait for it to reach *Running*.
-3. **Grab the connection details** the console shows for the deployed endpoint:
-   - **Inference endpoint URL** → `QUICKML_ENDPOINT`
-   - **API key / auth token** → `QUICKML_API_KEY`
+The SPA must call the API by **absolute URL** in production (no Vite proxy live).
+
+**4a. Build with the API base baked in:**
+```powershell
+cd frontend
+"VITE_API_BASE=https://<api-url-from-3d>" | Out-File -Encoding ascii .env.production
+npm install
+npm run build                 # → frontend/dist
+cd ..
+```
+
+**4b. Set up the client folder & drop the build in:**
+```powershell
+catalyst client:setup         # creates ./client with a client-package.json
+Remove-Item client/* -Recurse -Force -Exclude client-package.json
+Copy-Item frontend/dist/* client/ -Recurse
+```
+
+**4c. Configure `client/client-package.json` for SPA routing.** Set the `404` key to
+`index.html` so deep links like `/network` and `/person/:id` serve the app (react-router then
+takes over):
+```json
+{
+  "name": "ksp-crime-intelligence",
+  "version": "1.0.0",
+  "homepage": "index.html",
+  "404": "index.html"
+}
+```
+
+**4d. Deploy & verify:**
+```powershell
+catalyst deploy client
+```
+Open the hosted URL → Dashboard loads with the alerts feed, map renders, all pages work.
+
+**4e. CORS:** add your hosted frontend origin to `cors_origins` in `backend/app/config.py`
+(or via env), then rebuild + redeploy the backend (step 3). The API already allows `localhost:5173`.
+
+✅ **Backend + frontend are now live** (mock LLM). Continue to connect the real model.
+
+---
+
+## 5 · Enable QuickML & connect the real model   🧑  ← the part you asked about
+
+QuickML LLM Serving is the **Catalyst-compliant** model path (keeps you inside the rules + credits).
+All model access already routes through one gate: `backend/app/services/llm.py::QuickMLProvider`.
+
+1. **Enable / request access.** Console → your project → **QuickML** (under AI/ML). If it's gated,
+   use the in-console **"Request early access"** for *LLM Serving* (approved per account).
+   > 💰 QuickML is the one undisclosed cost — **deploy the model only when demoing and stop it when idle**.
+2. **Serve a model.** QuickML → **LLM Serving** → **Deploy / Serve model** → choose
+   **Qwen 2.5 14B Instruct** (matches `QUICKML_MODEL`). Wait until status = **Running**.
+3. **Copy the connection details** shown for the running endpoint:
+   - Inference **endpoint URL** → `QUICKML_ENDPOINT`
+   - **API key / token** → `QUICKML_API_KEY`
    - **Model name** → `QUICKML_MODEL` (e.g. `qwen2.5-14b-instruct`)
-4. **Wire it** — set these on the **AppSail** service env (console → AppSail → Configuration → Environment), then redeploy:
+4. **Wire it on the AppSail env** (console → AppSail → ksp-api → Configuration → Environment), then redeploy:
    ```
    LLM_PROVIDER=quickml
    QUICKML_ENDPOINT=<inference url>
    QUICKML_API_KEY=<key>
    QUICKML_MODEL=qwen2.5-14b-instruct
    ```
-   The single gate `backend/app/services/llm.py::QuickMLProvider` already does the HTTP call.
-5. **Test it.**
-   - Locally first (fastest loop): put the four vars in `backend/.env`, run the API, then
-     `curl -X POST localhost:9000/api/assistant/ask -H "Content-Type: application/json" -d '{"question":"Which districts have rising chain snatching?"}'` — `provider` should come back `quickml` with a real answer, and `/api/report` narratives become real.
-   - Then the same against the live API URL.
+5. **Test** (fastest loop is local first — put the 4 vars in `backend/.env`, run the API):
+   ```powershell
+   curl -X POST http://localhost:9000/api/assistant/ask -H "Content-Type: application/json" `
+     -d '{"question":"Which districts have rising chain snatching?"}'
+   ```
+   Expect `"provider":"quickml"` with a real answer; `/api/report` narratives also become real.
+   Then repeat against the live API URL.
 
-> ⚠️ Contract check: `QuickMLProvider.complete()` is written to the common OpenAI-style
-> chat shape (`messages[]` → `choices[0].message.content`). If your QuickML endpoint expects
-> a different request/response shape, that one method is the only thing to adjust — share the
-> endpoint's sample request and I'll align it. Keep `LLM_PROVIDER=mock` as the safe fallback.
+> ⚠️ **Contract check.** `QuickMLProvider.complete()` is written to the common OpenAI-style chat
+> shape (`messages[]` → `choices[0].message.content`). If your QuickML endpoint expects a
+> different request/response shape, **that one method is the only thing to change** — send me a
+> sample request/response and I'll align it. `LLM_PROVIDER=mock` stays the safe fallback.
 
 ---
 
-## 7. Phase 2 — Data Store + Cron Functions (move off bundled CSVs)
-Once you want the precompute-and-serve architecture live:
-1. **Create tables** (console → Data Store): the four core tables + the aggregates
-   (`hotspot_cells, district_stats, trend_baselines, alerts, risk_scores, anomalies, graph_edges`).
-2. **Seed** the core tables from the CSVs (admin creds):
-   ```powershell
-   py backend/scripts/seed_datastore.py --data data/output
-   ```
-3. **Deploy the Cron jobs** and run them once to populate the aggregates:
-   ```powershell
-   catalyst functions:add        # reconcile each functions/<job>/catalyst-config.json
-   catalyst deploy
-   #   then run hotspot_job / risk_job / graph_job from the console (or wait for cron)
-   ```
-   Remember to vendor `functions/common/` into each job folder (or use a shared layer) — see `functions/README.md`.
-4. **Flip the API** to read aggregates: set `DATA_MODE=catalyst` on the AppSail env and redeploy.
-   (Optional: enable SmartBrowz + Stratus for server-side report PDFs via `SMARTBROWZ_ENDPOINT`/`STRATUS_BUCKET`.)
+## 6 · Phase 2 — Data Store + Cron Functions (precompute-and-serve)
 
-## 8. Budget guardrails ($250 / ~60 days)
+Move off the bundled CSVs to the real architecture (API reads precomputed aggregates).
+
+**6a. Create tables** (console → **Data Store**): the 4 core tables
+(`incidents, persons, incident_persons, locations`) + the aggregates
+(`hotspot_cells, district_stats, trend_baselines, alerts, risk_scores, anomalies, graph_edges`).
+Match columns to `project_tech_stack.md §5` / the CSV headers.
+
+**6b. Seed the core tables** — use the built-in CLI bulk import (one per table):
+```powershell
+catalyst ds:import data/output/locations.csv --table locations
+catalyst ds:import data/output/persons.csv --table persons
+catalyst ds:import data/output/incidents.csv --table incidents
+catalyst ds:import data/output/incident_persons.csv --table incident_persons
+```
+(`backend/scripts/seed_datastore.py` is an SDK-based alternative if you prefer code.)
+
+**6c. Deploy the Cron jobs** that fill the aggregate tables:
+```powershell
+catalyst functions:setup          # if the functions dir isn't registered yet
+catalyst functions:add            # reconcile each functions/<job>/catalyst-config.json
+catalyst deploy functions
+```
+Then run `hotspot_job`, `risk_job`, `graph_job` once from the console (or wait for their cron) to
+populate the aggregates. **Package `functions/common/` into each job folder** (vendor it or use a
+shared layer) — see `functions/README.md`.
+
+**6d. Flip the API to read aggregates:** set `DATA_MODE=catalyst` on the AppSail env → redeploy.
+(Optional: `SMARTBROWZ_ENDPOINT` + `STRATUS_BUCKET` to render report PDFs server-side.)
+
+---
+
+## 7 · Budget guardrails ($250 / ~60 days)
 - AppSail + Functions stay within the free tier at demo scale; static frontend is negligible.
-- **QuickML is the cost unknown** — keep prompts small (already done), and **stop/undeploy the serving model when not demoing**.
-- Check the console **Billing/Usage** after each phase.
+- **QuickML is the cost unknown** — small prompts (already), and **stop the serving model when idle**.
+- Watch the console **Billing/Usage** after each phase; tear down endpoints you're not demoing.
 
 ---
 
-### What's prepared vs. what's yours
-- 🤖 Prepared & verified locally: deps resolve (`uv.lock`), frontend builds with `VITE_API_BASE`, Dockerfile bundles data, all feature endpoints work in `local`/`mock` mode, function compute verified on the CSVs.
-- 🧑 Yours (interactive / account-gated, can't be verified from here): `catalyst login`, project creation, AppSail/Client deploy, QuickML enablement + endpoint, and the live smoke tests above.
-- 🔌 One code touch-point may need your input: the exact QuickML request/response shape (step 6 ⚠️).
+## What's prepared vs. what's yours
+- 🤖 **Prepared & verified locally:** deps resolve (`uv.lock`), frontend builds with `VITE_API_BASE`,
+  Dockerfile bundles data + honors `$X_ZOHO_CATALYST_LISTEN_PORT`, all feature endpoints work in
+  `local`/`mock` mode, Function compute verified on the CSVs.
+- 🧑 **Yours (account-gated, can't run from here):** `catalyst login`, project creation, the
+  AppSail/client/functions deploys, Data Store create+import, and QuickML enablement + endpoint.
+- 🔌 **May need your input:** the exact QuickML request/response shape (step 5 ⚠️).
+
+## Sources (Catalyst docs)
+- [CLI command reference](https://docs.catalyst.zoho.com/en/cli/v1/cli-command-reference/)
+- [Deploy AppSail as a custom runtime from the CLI](https://docs.catalyst.zoho.com/en/serverless/help/appsail/custom-runtimes/deploy-from-cli)
+- [Deploy AppSail (CLI resources)](https://docs.catalyst.zoho.com/en/cli/v1/deploy-resources/deploy-appsail/)
+- [Web Client Hosting](https://docs.catalyst.zoho.com/en/cloud-scale/help/web-client-hosting/introduction/) · [client-package.json](https://docs.catalyst.zoho.com/en/cli/v1/project-directory-structure/client-directory/)
+- [AppSail custom runtimes — container registry/protocols](https://docs.catalyst.zoho.com/en/serverless/help/appsail/custom-runtimes/container-registry-services/)
