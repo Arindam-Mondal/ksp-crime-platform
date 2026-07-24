@@ -6,6 +6,7 @@ import {
   Users,
   Share2,
   TrendingUp,
+  UserCog,
   FileText,
   Sparkles,
   ShieldHalf,
@@ -18,6 +19,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/hotspots", label: "Geospatial Hotspots", icon: MapPinned },
   { to: "/demographics", label: "Demographics", icon: Users },
   { to: "/network", label: "Network / Link Analysis", icon: Share2 },
+  { to: "/operations", label: "Investigation Ops", icon: UserCog },
   { to: "/predictive", label: "Predictive & Anomaly", icon: TrendingUp },
   { to: "/reports", label: "AI Reports", icon: FileText },
   { to: "/assistant", label: "Ask the Data", icon: Sparkles },
@@ -102,7 +104,7 @@ export default function Layout() {
           </div>
           <div className="tabular mt-1.5 flex items-center justify-between text-[11px] text-muted">
             <span>Data · {health.data?.data_mode ?? "—"}</span>
-            <span>{online ? `${health.data!.incidents_loaded.toLocaleString()} rows` : "—"}</span>
+            <span>{online ? `${health.data!.cases_loaded.toLocaleString()} FIRs` : "—"}</span>
           </div>
         </div>
       </aside>

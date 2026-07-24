@@ -1,9 +1,10 @@
 """
 Cron / Event job — network precompute.
 
-Reads `incident_persons`, builds co-offender `graph_edges` (weight = shared incidents)
-and augments nodes with networkx centrality, then writes the `graph_edges` table.
-Can run nightly (Cron) or react to incident_persons inserts (Event/Signal).
+Reads the `Accused` table, resolves identities by (AccusedName, GenderID), builds
+co-accused `graph_edges` (weight = shared FIRs), augments them with networkx degree
+centrality, then writes the `graph_edges` table. Can run nightly (Cron) or react to
+Accused inserts (Event/Signal).
 
 Deploy note: package `common/` with this function; `networkx` is in requirements.txt.
 Not runnable locally.
@@ -19,8 +20,8 @@ from common import catalyst_io as io            # noqa: E402
 
 
 def handler(event, context):
-    links = io.read_all("incident_persons")
-    edges = agg.graph_edges(links)
+    accused = io.read_all("Accused")
+    edges = agg.graph_edges(accused)
 
     # centrality (degree) via networkx — written onto each edge's endpoints for the UI
     try:

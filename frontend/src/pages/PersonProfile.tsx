@@ -6,8 +6,8 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
 } from "recharts";
 import {
-  ArrowLeft, ShieldAlert, Layers, Users, Gavel, Swords, MapPin, Clock,
-  ListChecks, GitBranch, ChevronDown, Fingerprint, Activity, FileText,
+  ArrowLeft, ShieldAlert, Layers, Users, MapPin, Clock,
+  ListChecks, GitBranch, ChevronDown, Fingerprint, Activity, FileText, Lock,
 } from "lucide-react";
 import { api, Associate, CrimeRow } from "../lib/api";
 import Panel from "../components/Panel";
@@ -20,16 +20,19 @@ import DonutChart from "../components/charts/DonutChart";
 import ForceGraph from "../components/network/ForceGraph";
 import {
   CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle, cursorFill,
-  SEVERITY_COLORS, PALETTE,
+  HEAD_COLORS, PALETTE,
 } from "../components/charts/theme";
 
-const SEV_VARIANT: Record<string, any> = { Low: "success", Medium: "info", High: "warning", Severe: "danger" };
 const THREAT_VARIANT: Record<string, any> = { Low: "success", Medium: "warning", High: "danger" };
 const THREAT_RING: Record<string, string> = { Low: "#10b981", Medium: "#f59e0b", High: "#ef4444" };
 
+function gravityVariant(g: string): any {
+  return g === "Heinous" ? "danger" : "info";
+}
 function statusVariant(s: string): any {
-  if (s === "Charge-sheeted" || s === "Closed") return "success";
+  if (s === "Charge Sheeted" || s === "Convicted") return "success";
   if (s === "Under Investigation") return "warning";
+  if (s === "Closed - Undetected") return "danger";
   return "neutral";
 }
 function fmtDate(dt: string): string {
@@ -69,7 +72,7 @@ function CrimeMap({ crimes }: { crimes: CrimeRow[] }) {
           features: pts.map((c) => ({
             type: "Feature",
             geometry: { type: "Point", coordinates: [c.lon!, c.lat!] },
-            properties: { severity: c.severity, crime: c.crime_type },
+            properties: { gravity: c.gravity, crime: c.sub_head },
           })),
         },
       });
@@ -79,7 +82,7 @@ function CrimeMap({ crimes }: { crimes: CrimeRow[] }) {
         source: "crimes",
         paint: {
           "circle-radius": 6,
-          "circle-color": ["match", ["get", "severity"], "Low", "#10b981", "Medium", "#38bdf8", "High", "#f59e0b", "Severe", "#ef4444", "#5b7fff"],
+          "circle-color": ["match", ["get", "gravity"], "Heinous", "#ef4444", "Non-Heinous", "#38bdf8", "#5b7fff"],
           "circle-opacity": 0.85,
           "circle-stroke-width": 1.5,
           "circle-stroke-color": "#0a0e17",
@@ -92,7 +95,7 @@ function CrimeMap({ crimes }: { crimes: CrimeRow[] }) {
     return () => { map.remove(); mapRef.current = null; };
   }, [pts]);
 
-  if (pts.length === 0) return <EmptyState icon={MapPin} title="No geocoded crimes" hint="This person's incidents have no mapped coordinates." />;
+  if (pts.length === 0) return <EmptyState icon={MapPin} title="No geocoded cases" hint="This person's FIRs have no mapped coordinates." />;
   return <div ref={el} className="h-[420px] w-full overflow-hidden rounded-b-2xl" />;
 }
 
@@ -120,9 +123,9 @@ function AssociateRow({ rootId, a }: { rootId: string; a: Associate }) {
             <ul className="space-y-1.5">
               {(rel.data?.shared ?? []).map((s) => (
                 <li key={s.id} className="flex items-center gap-2 text-xs">
-                  <Badge variant={SEV_VARIANT[s.severity] ?? "neutral"}>{s.severity}</Badge>
-                  <span className="tabular text-muted">{s.id}</span>
-                  <span className="text-white/80">{s.crime_type}</span>
+                  <Badge variant={gravityVariant(s.gravity)}>{s.gravity}</Badge>
+                  <span className="tabular text-muted">{s.crime_no}</span>
+                  <span className="text-white/80">{s.sub_head}</span>
                   <span className="text-muted">· {s.district}</span>
                   <span className="tabular ml-auto text-muted">{fmtDate(s.datetime)}</span>
                 </li>
@@ -172,11 +175,15 @@ export default function PersonProfile() {
                 <h1 className="text-2xl font-bold tracking-tight text-white">{p.person.name}</h1>
                 <Badge variant={THREAT_VARIANT[p.threat.level]} dot>{p.threat.level} threat · {p.threat.score}</Badge>
               </div>
-              <div className="tabular mt-1 text-sm text-muted">{p.person.id}</div>
+              <div className="tabular mt-1 text-sm text-muted">
+                {p.person.id} · identity resolved across {p.stats.total_cases} FIR{p.stats.total_cases === 1 ? "" : "s"}
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Chip icon={Fingerprint}>{p.person.role}</Chip>
-                <Chip icon={Users}>{p.person.gender === "F" ? "Female" : "Male"} · {p.person.age ?? "?"} yrs</Chip>
-                <Chip icon={MapPin}>{p.person.address_district}</Chip>
+                <Chip icon={Users}>{p.person.gender === "F" ? "Female" : p.person.gender === "T" ? "Transgender" : "Male"} · {p.person.age ?? "?"} yrs</Chip>
+                <Chip icon={MapPin}>
+                  {p.person.districts.slice(0, 3).join(", ")}
+                  {p.person.districts.length > 3 ? ` +${p.person.districts.length - 3}` : ""}
+                </Chip>
                 <Chip icon={Clock}>{fmtMonthYear(p.stats.first_seen)} → {fmtMonthYear(p.stats.last_seen)}</Chip>
               </div>
             </div>
@@ -186,14 +193,14 @@ export default function PersonProfile() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total FIRs" value={p ? String(p.stats.total_incidents) : "—"} icon={Layers} accent="danger" caption={p?.stats.top_crime ? `Mostly ${p.stats.top_crime}` : undefined} />
-        <StatCard label="Co-offenders" value={p ? String(p.stats.co_offenders) : "—"} icon={Users} accent="info" caption="Linked associates" />
-        <StatCard label="Clearance" value={p ? `${p.stats.clearance_rate}%` : "—"} icon={Gavel} accent="success" caption="Charge-sheeted/closed" />
-        <StatCard label="Weapon FIRs" value={p ? String(p.stats.weapon_incidents) : "—"} icon={Swords} accent="warning" caption={p ? `of ${p.stats.total_incidents}` : undefined} />
+        <StatCard label="Linked FIRs" value={p ? String(p.stats.total_cases) : "—"} icon={Layers} accent="danger" caption={p?.stats.top_crime ? `Mostly ${p.stats.top_crime}` : undefined} />
+        <StatCard label="Heinous cases" value={p ? String(p.stats.heinous_cases) : "—"} icon={ShieldAlert} accent="warning" caption={p ? `of ${p.stats.total_cases} total` : undefined} />
+        <StatCard label="Co-accused" value={p ? String(p.stats.co_accused) : "—"} icon={Users} accent="info" caption="Linked associates" />
+        <StatCard label="Arrests" value={p ? String(p.stats.arrests + p.stats.surrenders) : "—"} icon={Lock} accent="success" caption={p ? `${p.stats.surrenders} surrendered · ${p.stats.chargesheet_rate}% chargesheeted` : undefined} />
       </div>
 
       {/* Timeline */}
-      <Panel icon={Activity} title="Activity timeline" subtitle="Monthly offending volume">
+      <Panel icon={Activity} title="Activity timeline" subtitle="Monthly FIR involvement">
         <div style={{ height: 220 }}>
           {profile.isPending ? (
             <Skeleton className="h-full w-full" />
@@ -217,40 +224,63 @@ export default function PersonProfile() {
         </div>
       </Panel>
 
-      {/* Crime mix + MO */}
+      {/* Crime mix + sections */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Panel icon={ListChecks} title="Crime types">
+        <Panel icon={ListChecks} title="Crime sub-heads">
           {profile.isPending || !p ? <Skeleton className="h-[200px] w-full" /> : (
             <DonutChart data={p.crime_mix.by_type.map((x) => ({ name: x.name, value: x.count }))} colors={(_, i) => PALETTE[i % PALETTE.length]} height={200} />
           )}
         </Panel>
-        <Panel icon={ShieldAlert} title="Severity">
+        <Panel icon={ShieldAlert} title="Crime heads">
           {profile.isPending || !p ? <Skeleton className="h-[200px] w-full" /> : (
-            <DonutChart data={p.crime_mix.by_severity.map((x) => ({ name: x.name, value: x.count }))} colors={(n) => SEVERITY_COLORS[n] ?? CHART.accent} height={200} />
+            <DonutChart data={p.crime_mix.by_head.map((x) => ({ name: x.name, value: x.count }))} colors={(n) => HEAD_COLORS[n] ?? CHART.accent} height={200} />
           )}
         </Panel>
-        <Panel icon={FileText} title="Modus operandi" subtitle="Most frequent tags">
+        <Panel icon={FileText} title="Sections invoked" subtitle="Across all linked FIRs">
           {profile.isPending || !p ? <Skeleton className="h-[200px] w-full" /> : (
             <div className="flex flex-wrap gap-2">
-              {p.top_mo.length ? p.top_mo.map((m) => (
+              {p.top_sections.length ? p.top_sections.map((m) => (
                 <span key={m.name} className="rounded-full border border-line bg-surface-2/60 px-3 py-1 text-xs text-white/80">
                   {m.name} <span className="tabular text-muted">×{m.count}</span>
                 </span>
-              )) : <span className="text-sm text-muted">No MO tags recorded.</span>}
+              )) : <span className="text-sm text-muted">No sections recorded.</span>}
             </div>
           )}
         </Panel>
       </div>
 
+      {/* Arrest history */}
+      <Panel icon={Lock} title="Arrest & surrender history" subtitle="From the ArrestSurrender table">
+        {profile.isPending ? (
+          <TableSkeleton rows={3} />
+        ) : p && p.arrest_history.length ? (
+          <ul className="space-y-2">
+            {p.arrest_history.map((a, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line bg-bg/30 px-4 py-2.5 text-sm">
+                <Badge variant={a.type === "Surrender" ? "info" : "warning"}>{a.type}</Badge>
+                <span className="tabular text-white/85">{fmtDate(a.date)}</span>
+                <span className="text-muted">· {a.sub_head}</span>
+                <span className="tabular text-muted">{a.crime_no}</span>
+                <span className="ml-auto text-xs text-white/70">
+                  {a.district}{a.state && a.state !== "Karnataka" ? `, ${a.state} (out-of-state)` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState icon={Lock} title="No arrests recorded" hint="No arrest or surrender events are linked to this person." />
+        )}
+      </Panel>
+
       {/* Crime map */}
-      <Panel icon={MapPin} title="Crime map" subtitle="Where this person has offended" bodyClassName="p-0">
+      <Panel icon={MapPin} title="Crime map" subtitle="Case locations — red = heinous" bodyClassName="p-0">
         {profile.isPending ? <Skeleton className="h-[420px] w-full" /> : <CrimeMap crimes={crimes} />}
       </Panel>
 
       {/* Crime history table */}
       <Panel
         icon={ListChecks}
-        title="Crime history"
+        title="Case history"
         subtitle={p ? `${crimes.length} linked FIRs` : undefined}
         actions={crimes.length > 10 ? (
           <button onClick={() => setShowAll((v) => !v)} className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition-colors hover:border-line-strong hover:text-white">
@@ -265,10 +295,10 @@ export default function PersonProfile() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
-                  <th className="py-2.5 pr-4">FIR</th>
-                  <th className="py-2.5 pr-4">Crime</th>
-                  <th className="py-2.5 pr-4">Section</th>
-                  <th className="py-2.5 pr-4">Severity</th>
+                  <th className="py-2.5 pr-4">Crime No</th>
+                  <th className="py-2.5 pr-4">Sub-head</th>
+                  <th className="py-2.5 pr-4">Sections</th>
+                  <th className="py-2.5 pr-4">Gravity</th>
                   <th className="py-2.5 pr-4">District</th>
                   <th className="py-2.5 pr-4">Date</th>
                   <th className="py-2.5">Status</th>
@@ -277,10 +307,10 @@ export default function PersonProfile() {
               <tbody>
                 {visibleCrimes.map((c) => (
                   <tr key={c.id} className="border-b border-line/60 transition-colors hover:bg-white/[0.025]">
-                    <td className="tabular py-2.5 pr-4 text-muted">{c.id}</td>
-                    <td className="py-2.5 pr-4 font-medium text-white/90">{c.crime_type}</td>
-                    <td className="tabular py-2.5 pr-4 text-white/60">{c.ipc_section}</td>
-                    <td className="py-2.5 pr-4"><Badge variant={SEV_VARIANT[c.severity] ?? "neutral"}>{c.severity}</Badge></td>
+                    <td className="tabular py-2.5 pr-4 text-muted">{c.crime_no}</td>
+                    <td className="py-2.5 pr-4 font-medium text-white/90">{c.sub_head}</td>
+                    <td className="tabular py-2.5 pr-4 text-white/60">{c.sections.join(", ")}</td>
+                    <td className="py-2.5 pr-4"><Badge variant={gravityVariant(c.gravity)}>{c.gravity}</Badge></td>
                     <td className="py-2.5 pr-4 text-white/70">{c.district}</td>
                     <td className="tabular py-2.5 pr-4 text-white/70">{fmtDate(c.datetime)}</td>
                     <td className="py-2.5"><Badge variant={statusVariant(c.status)}>{c.status}</Badge></td>
@@ -294,7 +324,7 @@ export default function PersonProfile() {
 
       {/* Associations + mini graph */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel icon={Users} title="Known associates" subtitle={p ? `${p.associates.length} co-offenders · expand for shared cases` : undefined}>
+        <Panel icon={Users} title="Known associates" subtitle={p ? `${p.associates.length} co-accused · expand for shared cases` : undefined}>
           {profile.isPending ? (
             <TableSkeleton rows={6} />
           ) : p && p.associates.length ? (
@@ -302,7 +332,7 @@ export default function PersonProfile() {
               {p.associates.map((a) => <AssociateRow key={a.person_id} rootId={id} a={a} />)}
             </ul>
           ) : (
-            <EmptyState icon={Users} title="No known associates" hint="This person has no recorded co-offending links." />
+            <EmptyState icon={Users} title="No known associates" hint="This person has no recorded co-accused links." />
           )}
         </Panel>
 
@@ -312,7 +342,7 @@ export default function PersonProfile() {
           ) : ego.data && ego.data.nodes.length > 1 ? (
             <ForceGraph nodes={ego.data.nodes} edges={ego.data.edges} height={440} nodeScale={0.78} onNodeClick={(pid) => pid !== id && navigate(`/person/${pid}`)} />
           ) : (
-            <EmptyState icon={GitBranch} title="No network" hint="No co-offending links to graph." />
+            <EmptyState icon={GitBranch} title="No network" hint="No co-accused links to graph." />
           )}
         </Panel>
       </div>

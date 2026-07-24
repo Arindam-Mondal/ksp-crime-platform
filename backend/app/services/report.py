@@ -1,7 +1,7 @@
 """
 AI intelligence report builder (Pillar 4).
 
-Assembles a structured briefing from the precomputed aggregates and writes the
+Assembles a structured briefing from the ERD-backed aggregates and writes the
 narrative through the single LLM gate (`services/llm.py`). Local mode returns JSON
 (the frontend renders + prints to PDF). In catalyst mode `render_pdf()` is the hook
 for SmartBrowz HTML→PDF + Stratus storage (wired at deploy; see CLAUDE.md budget rule).
@@ -11,80 +11,71 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime
 
-from app.services import aggregations
-from app.services.datastore import get_store
+from app.services import aggregations, firdata
 from app.services.llm import get_llm
 
-CLEARED = {"Charge-sheeted", "Closed"}
 
-
-def _top_offenders(incidents_ids: set[str] | None, limit: int = 8) -> list[dict]:
-    links = get_store().rows("incident_persons")
-    persons = {p["id"]: p for p in get_store().rows("persons")}
-    counts: Counter = Counter()
-    for l in links:
-        if l.get("role") != "offender":
+def _top_offenders(case_ids: set[int] | None, limit: int = 8) -> list[dict]:
+    out = []
+    for oid, g in firdata.offenders()["by_id"].items():
+        if case_ids is not None and not (set(g["case_ids"]) & case_ids):
             continue
-        if incidents_ids is not None and l.get("incident_id") not in incidents_ids:
-            continue
-        counts[l["person_id"]] += 1
-    return [
-        {"person_id": pid, "name": persons.get(pid, {}).get("name", pid), "incidents": n}
-        for pid, n in counts.most_common(limit)
-    ]
+        n = g["n_cases"] if case_ids is None else len(set(g["case_ids"]) & case_ids)
+        out.append({"person_id": oid, "name": g["name"], "cases": n})
+        if case_ids is None and len(out) >= limit:
+            break
+    out.sort(key=lambda x: -x["cases"])
+    return out[:limit]
 
 
 def build_report(scope: str = "state", subject_id: str | None = None) -> dict:
-    incidents_all = get_store().rows("incidents")
-    locations = get_store().rows("locations")
+    cases_all = firdata.cases()
 
-    # Scope the incident set.
     if scope == "district" and subject_id:
-        incidents = [r for r in incidents_all if r.get("district") == subject_id]
+        rows = [c for c in cases_all if c["district"] == subject_id]
         subject = subject_id
     elif scope == "person" and subject_id:
-        link_ids = {
-            l["incident_id"] for l in get_store().rows("incident_persons")
-            if l.get("person_id") == subject_id and l.get("role") == "offender"
-        }
-        incidents = [r for r in incidents_all if r.get("id") in link_ids]
-        persons = {p["id"]: p for p in get_store().rows("persons")}
-        subject = persons.get(subject_id, {}).get("name", subject_id)
+        g = firdata.offenders()["by_id"].get(subject_id)
+        ids = set(g["case_ids"]) if g else set()
+        rows = [c for c in cases_all if c["id"] in ids]
+        subject = g["name"] if g else subject_id
     else:
         scope = "state"
-        incidents = incidents_all
+        rows = cases_all
         subject = "Karnataka (State-wide)"
 
-    total = len(incidents)
-    cleared = sum(1 for r in incidents if r.get("status") in CLEARED)
-    crimes = Counter(r.get("crime_type", "") for r in incidents)
-    districts = Counter(r.get("district", "") for r in incidents)
-    clearance = round(cleared / total * 100, 1) if total else 0
-    cyber = round(sum(1 for r in incidents if r.get("crime_type") == "Cybercrime") / total * 100, 1) if total else 0
+    total = len(rows)
+    finals = [c for c in rows if c["cstype"]]
+    charged = sum(1 for c in finals if c["cstype"] == "A")
+    cs_rate = round(charged / len(finals) * 100, 1) if finals else 0
+    subs = Counter(c["sub_head"] for c in rows)
+    districts = Counter(c["district"] for c in rows)
+    heinous = round(sum(1 for c in rows if c["heinous"]) / total * 100, 1) if total else 0
+    cyber = round(sum(1 for c in rows if c["head"] == "Cyber Crime") / total * 100, 1) if total else 0
+    arrests = sum(c["n_arrests"] for c in rows)
 
-    # Aggregates (alerts/anomalies are computed on the full set, then filtered for scope).
-    alerts = aggregations.spike_alerts(incidents_all, locations)
-    anoms = aggregations.anomalies(incidents_all)
+    alerts = aggregations.spike_alerts(cases_all)
+    anoms = aggregations.anomalies(cases_all)
     if scope == "district" and subject_id:
         alerts = [a for a in alerts if a["district"] == subject_id]
         anoms = [a for a in anoms if a["subject"] == subject_id]
-    dstats = aggregations.district_stats(incidents, locations)
-    inc_ids = {r["id"] for r in incidents} if scope != "state" else None
-    offenders = _top_offenders(inc_ids)
+    dstats = aggregations.district_stats(rows)
+    case_ids = {c["id"] for c in rows} if scope != "state" else None
+    offenders = _top_offenders(case_ids)
 
-    # Narrative via the LLM gate (mock locally; QuickML in production).
     top_alert = alerts[0] if alerts else None
     prompt = (
         f"Write a concise 4-5 sentence crime-intelligence briefing for {subject}. "
-        f"Reported incidents: {total}. Clearance rate: {clearance}%. "
-        f"Top crime: {crimes.most_common(1)[0][0] if crimes else 'n/a'}. "
-        f"Cybercrime share: {cyber}%. Active spike alerts: {len(alerts)}"
-        + (f" (notably {top_alert['crime_type']} up {top_alert['ratio']}x in {top_alert['district']})" if top_alert else "")
+        f"Registered cases: {total}. Chargesheet rate: {cs_rate}%. "
+        f"Heinous share: {heinous}%. "
+        f"Top crime: {subs.most_common(1)[0][0] if subs else 'n/a'}. "
+        f"Cyber-crime share: {cyber}%. Arrests: {arrests}. Active spike alerts: {len(alerts)}"
+        + (f" (notably {top_alert['sub_head']} up {top_alert['ratio']}x in {top_alert['district']})" if top_alert else "")
         + f". Statistical anomalies flagged: {len(anoms)}. "
         "Highlight emerging risks and recommend where to focus resources."
     )
     context = [a["description"] for a in anoms[:3]] + (
-        [f"{a['crime_type']} surging {a['ratio']}x in {a['district']}" for a in alerts[:3]]
+        [f"{a['sub_head']} surging {a['ratio']}x in {a['district']}" for a in alerts[:3]]
     )
     llm = get_llm().complete(prompt, context=context)
 
@@ -97,15 +88,15 @@ def build_report(scope: str = "state", subject_id: str | None = None) -> dict:
         "provider": llm.provider,
         "model": llm.model,
         "kpis": [
-            {"label": "Total incidents", "value": f"{total:,}"},
-            {"label": "Clearance rate", "value": f"{clearance}%"},
+            {"label": "Registered cases", "value": f"{total:,}"},
+            {"label": "Chargesheet rate", "value": f"{cs_rate}%"},
+            {"label": "Heinous share", "value": f"{heinous}%"},
+            {"label": "Arrests", "value": f"{arrests:,}"},
             {"label": "Districts", "value": str(len(districts))},
-            {"label": "Cyber share", "value": f"{cyber}%"},
             {"label": "Active alerts", "value": str(len(alerts))},
-            {"label": "Anomalies", "value": str(len(anoms))},
         ],
         "hotspots": [
-            {"district": d["district"], "incidents": d["incidents"], "risk_score": d["risk_score"]}
+            {"district": d["district"], "cases": d["cases"], "risk_score": d["risk_score"]}
             for d in dstats[:6]
         ],
         "offenders": offenders,

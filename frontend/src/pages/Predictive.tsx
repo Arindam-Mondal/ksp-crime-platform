@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, ShieldAlert, ArrowUpDown, Radar, Clock, BarChart2 } from "lucide-react";
-import { api, RiskScore } from "../lib/api";
+import { api, DistrictStat } from "../lib/api";
 import Panel from "../components/Panel";
 import PageHeader from "../components/PageHeader";
 import Badge from "../components/Badge";
 import { TableSkeleton, ListSkeleton } from "../components/Skeleton";
 
-type SortKey = "risk_score" | "incidents";
+type SortKey = "risk_score" | "cases" | "heinous_share" | "pendency_rate";
 
 function riskTier(score: number, max: number): { label: string; variant: "danger" | "warning" | "success" } {
   const r = max ? score / max : 0;
@@ -31,7 +31,7 @@ export default function Predictive() {
   const max = items.reduce((m, r) => Math.max(m, r.risk_score), 0) || 1;
 
   const sorted = useMemo(
-    () => [...items].sort((a: RiskScore, b: RiskScore) => b[sort] - a[sort]),
+    () => [...items].sort((a: DistrictStat, b: DistrictStat) => (b[sort] as number) - (a[sort] as number)),
     [items, sort]
   );
 
@@ -65,7 +65,11 @@ export default function Predictive() {
         }
       />
 
-      <Panel icon={ShieldAlert} title="Risk-scored districts" subtitle="Sorted by composite risk model">
+      <Panel
+        icon={ShieldAlert}
+        title="Risk-scored districts"
+        subtitle="Volume · heinous concentration · investigative pendency · 90-day momentum"
+      >
         {risk.isPending ? (
           <TableSkeleton rows={10} />
         ) : (
@@ -76,11 +80,18 @@ export default function Predictive() {
                   <th className="py-2.5 pr-4 font-semibold">#</th>
                   <th className="py-2.5 pr-4 font-semibold">District</th>
                   <th className="py-2.5 pr-4 font-semibold">
-                    <SortBtn k="incidents">Incidents</SortBtn>
+                    <SortBtn k="cases">Cases</SortBtn>
                   </th>
-                  <th className="py-2.5 pr-4 font-semibold">SEI</th>
+                  <th className="py-2.5 pr-4 font-semibold">
+                    <SortBtn k="heinous_share">Heinous</SortBtn>
+                  </th>
+                  <th className="py-2.5 pr-4 font-semibold">
+                    <SortBtn k="pendency_rate">Pendency</SortBtn>
+                  </th>
+                  <th className="py-2.5 pr-4 font-semibold">CS rate</th>
+                  <th className="py-2.5 pr-4 font-semibold">90d</th>
                   <th className="py-2.5 pr-4 font-semibold">Tier</th>
-                  <th className="w-2/5 py-2.5 font-semibold">
+                  <th className="w-1/4 py-2.5 font-semibold">
                     <SortBtn k="risk_score">Risk score</SortBtn>
                   </th>
                 </tr>
@@ -95,8 +106,11 @@ export default function Predictive() {
                     >
                       <td className="tabular py-2.5 pr-4 text-muted">{String(i + 1).padStart(2, "0")}</td>
                       <td className="py-2.5 pr-4 font-medium text-white/90">{r.district}</td>
-                      <td className="tabular py-2.5 pr-4 text-white/70">{r.incidents.toLocaleString()}</td>
-                      <td className="tabular py-2.5 pr-4 text-white/70">{r.socio_economic_index}</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.cases.toLocaleString()}</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.heinous_share}%</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.pendency_rate}%</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.chargesheet_rate}%</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.recent_90d}</td>
                       <td className="py-2.5 pr-4">
                         <Badge variant={tier.variant}>{tier.label}</Badge>
                       </td>

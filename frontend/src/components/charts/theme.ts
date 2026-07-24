@@ -37,31 +37,50 @@ export function formatNumber(n: number): string {
 }
 
 // Categorical color maps shared across the dashboard & demographics views.
+// Crime heads per the FIR ERD's CrimeHead master.
 export const HEAD_COLORS: Record<string, string> = {
-  "Property Crime": "#5b7fff",
-  "Economic Offence": "#38bdf8",
-  "Crime Against Person": "#f472b6",
-  "Special & Local Laws": "#f59e0b",
+  "Crimes Against Body": "#f472b6",
+  "Crimes Against Property": "#5b7fff",
+  "Crimes Against Women": "#a78bfa",
+  "Economic Offences": "#38bdf8",
+  "Cyber Crime": "#22d3ee",
+  "Crimes Against Public Order": "#f59e0b",
+  "Special & Local Laws": "#fb923c",
+  Others: "#8a94ad",
   Other: "#8a94ad",
 };
 
-export const SEVERITY_COLORS: Record<string, string> = {
-  Low: "#10b981",
-  Medium: "#38bdf8",
-  High: "#f59e0b",
-  Severe: "#ef4444",
+// GravityOffence lookup (Heinous / Non-Heinous).
+export const GRAVITY_COLORS: Record<string, string> = {
+  Heinous: "#ef4444",
+  "Non-Heinous": "#38bdf8",
 };
 
+// CaseStatusMaster values.
 export const STATUS_COLORS: Record<string, string> = {
-  "Charge-sheeted": "#10b981",
-  Closed: "#22d3ee",
   "Under Investigation": "#f59e0b",
+  "Charge Sheeted": "#34d399",
   "Pending Trial": "#a78bfa",
+  Convicted: "#10b981",
+  Acquitted: "#22d3ee",
+  "Closed - False Case": "#8a94ad",
+  "Closed - Undetected": "#ef4444",
+  "Closed - Others": "#64748b",
+  Transferred: "#f472b6",
+};
+
+// CaseCategory values (FIR / Zero FIR / UDR / PAR).
+export const CATEGORY_COLORS: Record<string, string> = {
+  FIR: "#5b7fff",
+  "Zero FIR": "#22d3ee",
+  UDR: "#f59e0b",
+  PAR: "#a78bfa",
 };
 
 export const GENDER_COLORS: Record<string, string> = {
   Male: "#5b7fff",
   Female: "#f472b6",
+  Transgender: "#f59e0b",
 };
 
 // General-purpose categorical palette (age groups, urban/rural, etc.).

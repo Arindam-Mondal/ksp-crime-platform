@@ -13,7 +13,7 @@ export default function AlertsFeed({ items, limit }: { items: SpikeAlert[]; limi
         const critical = a.severity === "Critical";
         return (
           <li
-            key={`${a.district}-${a.crime_type}`}
+            key={`${a.district}-${a.sub_head}`}
             className={`relative overflow-hidden rounded-xl border px-4 py-3 ${
               critical ? "border-danger/30 bg-danger/[0.07]" : "border-warning/25 bg-warning/[0.05]"
             }`}
@@ -26,7 +26,7 @@ export default function AlertsFeed({ items, limit }: { items: SpikeAlert[]; limi
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold text-white/90">{a.crime_type}</span>
+                  <span className="truncate text-sm font-semibold text-white/90">{a.sub_head}</span>
                   <span className={`tabular inline-flex items-center gap-0.5 text-sm font-bold ${critical ? "text-danger" : "text-warning"}`}>
                     <TrendingUp size={13} /> {a.ratio}×
                   </span>

@@ -62,7 +62,7 @@ export default function Reports() {
             {scope === "person" && (
               <div>
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted">Person ID</label>
-                <input value={personId} onChange={(e) => setPersonId(e.target.value)} placeholder="e.g. P004964"
+                <input value={personId} onChange={(e) => setPersonId(e.target.value)} placeholder="e.g. O00001"
                   className="rounded-lg border border-line bg-bg/60 px-3 py-2 text-sm text-white/90 outline-none placeholder:text-muted focus:border-accent" />
               </div>
             )}
@@ -135,7 +135,7 @@ export default function Reports() {
                   {r.hotspots.map((h) => (
                     <tr key={h.district} className="border-b border-line/60">
                       <td className="py-1.5 font-medium text-white/90">{h.district}</td>
-                      <td className="tabular py-1.5 text-right text-white/70">{h.incidents.toLocaleString()}</td>
+                      <td className="tabular py-1.5 text-right text-white/70">{h.cases.toLocaleString()}</td>
                       <td className="py-1.5 pl-3 text-right"><Badge variant="warning">risk {h.risk_score}</Badge></td>
                     </tr>
                   ))}
@@ -152,7 +152,7 @@ export default function Reports() {
                     <tr key={o.person_id} className="border-b border-line/60">
                       <td className="py-1.5 font-medium text-white/90">{o.name}</td>
                       <td className="tabular py-1.5 text-muted print-muted">{o.person_id}</td>
-                      <td className="tabular py-1.5 text-right text-white/70">{o.incidents} FIRs</td>
+                      <td className="tabular py-1.5 text-right text-white/70">{o.cases} FIRs</td>
                     </tr>
                   ))}
                 </tbody>
@@ -166,9 +166,9 @@ export default function Reports() {
               <SectionTitle icon={Siren}>Active spike alerts</SectionTitle>
               <ul className="mt-2 space-y-1.5 text-sm">
                 {r.alerts.map((a) => (
-                  <li key={`${a.district}-${a.crime_type}`} className="flex items-center gap-2">
+                  <li key={`${a.district}-${a.sub_head}`} className="flex items-center gap-2">
                     <Badge variant={a.severity === "Critical" ? "danger" : "warning"}>{a.severity}</Badge>
-                    <span className="text-white/85">{a.crime_type} ↑ {a.ratio}× · {a.district}</span>
+                    <span className="text-white/85">{a.sub_head} ↑ {a.ratio}× · {a.district}</span>
                     <span className="tabular ml-auto text-muted print-muted">{a.recent} in 30d</span>
                   </li>
                 ))}

@@ -2,14 +2,18 @@
 
 AI-driven crime analytics & visualization platform for the Karnataka State Police (KSP) / State Crime Records Bureau (SCRB). Hackathon submission deployed on **Zoho Catalyst**.
 
-> Problem statement: [`challange.md`](./challange.md) · Tech stack & architecture: [`project_tech_stack.md`](./project_tech_stack.md) · Catalyst services: [`zoho_resources.md`](./zoho_resources.md)
+> Problem statement: [`challange.md`](./challange.md) · **Official FIR data model: [`ERD_SCHEMA.md`](./ERD_SCHEMA.md)** (from `Police_FIR_ER_Diagram.pdf`, followed strictly) · Tech stack & architecture: [`project_tech_stack.md`](./project_tech_stack.md) · Catalyst services: [`zoho_resources.md`](./zoho_resources.md)
 
 ## The four pillars
 
-1. **Geospatial hotspots** — district drill-down maps, spatiotemporal clusters, emerging-trend (spike) alerts.
-2. **Network / link analysis** — suspect↔victim↔location graph, repeat-offender & MO tracking, association detection.
-3. **Predictive & anomaly AI** — risk scoring, socio-economic overlays, anomaly call-outs.
-4. **NL query + AI reports** — plain-English questions over the data + one-click PDF intelligence reports.
+1. **Geospatial hotspots** — district/station drill-down maps over CaseMaster GPS, spatiotemporal clusters, emerging-trend (spike) alerts.
+2. **Network / link analysis** — co-accused graph with cross-FIR identity resolution, repeat-offender profiles with arrest history, association detection.
+3. **Predictive & anomaly AI** — district risk scoring (volume, heinous share, pendency), anomaly call-outs.
+4. **NL query + AI reports** — plain-English questions over FIR BriefFacts + one-click PDF intelligence reports.
+
+Plus the ERD-powered operational analytics: investigation funnel (FIR → chargesheet → trial →
+conviction), act/section usage, arrest & surrender analytics, officer workload, court caseload,
+and complainant/victim/accused demographics.
 
 ## Repo layout
 
@@ -17,7 +21,7 @@ AI-driven crime analytics & visualization platform for the Karnataka State Polic
 backend/        FastAPI app (uv + Docker) → Catalyst AppSail custom OCI runtime
 functions/      Cron/Event serverless jobs (heavy precompute, pip + Python 3.9) → Catalyst Functions
 frontend/       React + Vite + TS SPA → Catalyst Slate
-data/generator/ Synthetic Karnataka dataset generator (stdlib Python, no dependencies)
+data/generator/ Synthetic Police FIR dataset generator per the ERD (stdlib Python, no dependencies)
 ```
 
 ---
@@ -38,20 +42,21 @@ data/generator/ Synthetic Karnataka dataset generator (stdlib Python, no depende
 
 ### Step 1 — Generate the synthetic dataset
 
-The generator is stdlib-only (no install needed). Run it once; outputs four CSVs to `data/output/`.
+The generator is stdlib-only (no install needed). Run it once; outputs one CSV per ERD table
+(26 tables — see `ERD_SCHEMA.md`) to `data/output/`.
 
 ```powershell
-py data/generator/generate_synthetic.py --incidents 20000 --seed 42
+py data/generator/generate_synthetic.py --cases 20000 --seed 42
 ```
 
 Expected output:
 ```
-Wrote synthetic dataset to ...\data\output
-  locations.csv            182 rows
-  persons.csv             6000 rows  (324 repeat offenders)
-  incidents.csv          20000 rows
-  incident_persons.csv   46566 rows
-  emerging-trend spike seeded: 'Chain Snatching' in Raichur (last 30 days)
+Wrote FIR dataset (20000 cases) to ...\data\output
+  Units: 237 | Employees: 1041 | Courts: 62
+  Complainants: 20844 | Victims: 19151 | Accused: 21690 (habitual-linked rows: 8069)
+  ActSections: 35894 | Arrests: 12056 | Chargesheets: 10918 {'B': 584, 'C': 3343, 'A': 6991}
+  Categories: FIR=18188, PAR=743, UDR=690, Zero FIR=379
+  Emerging spike: 'Chain Snatching' in Ballari (last 30 days)
 ```
 
 ---
@@ -71,7 +76,7 @@ uv run uvicorn app.main:app --reload --port 9000
 ```
 
 Verify it's up:
-- **Health check:** http://localhost:9000/health — should return `"incidents_loaded": 20000`
+- **Health check:** http://localhost:9000/health — should return `"cases_loaded": 20000`
 - **Interactive API docs:** http://localhost:9000/docs
 
 The backend runs in `DATA_MODE=local` by default, which reads the CSVs from `data/output/`.

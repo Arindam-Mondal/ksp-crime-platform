@@ -14,9 +14,9 @@ from app.routers import (
     alerts,
     analytics,
     assistant,
+    cases,
     health,
     hotspots,
-    incidents,
     network,
     predictive,
     report,
@@ -31,17 +31,20 @@ app = FastAPI(
                 "over Karnataka crime data. Serves precomputed aggregates (see CLAUDE.md).",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# On Catalyst the AppSail gateway already emits CORS headers; adding ours too duplicates
+# Access-Control-Allow-Origin (browsers reject that). Gate it via APP_CORS_ENABLED.
+if settings.app_cors_enabled:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # One router per pillar.
 app.include_router(health.router)
-app.include_router(incidents.router)
+app.include_router(cases.router)
 app.include_router(hotspots.router)
 app.include_router(network.router)
 app.include_router(predictive.router)

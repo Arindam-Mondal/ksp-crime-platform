@@ -8,6 +8,9 @@ An **AI-driven crime analytics & visualization platform** for the Karnataka Stat
 
 Authoritative design docs (read these before large changes):
 - `challange.md` — the problem statement (do not edit).
+- `Police_FIR_ER_Diagram.pdf` + `ERD_SCHEMA.md` — the official FIR database schema provided
+  with the challenge. **The data model must strictly follow it** (table & column names
+  exactly as transcribed in `ERD_SCHEMA.md`). Do not edit the PDF.
 - `zoho_resources.md` — Catalyst service mapping; "use the matching Catalyst service" is a hard rule (do not edit).
 - `project_tech_stack.md` — the locked stack, constraints, data model, and phased build plan.
 
@@ -39,9 +42,12 @@ backend/
   app/
     main.py            FastAPI app entrypoint (uvicorn app.main:app)
     config.py          Settings: DATA_MODE=local|catalyst, paths, QuickML config
-    routers/           One router per pillar: health, incidents, hotspots, network, predictive, assistant
+    routers/           One router per pillar: health, cases, hotspots, network, predictive,
+                       analytics, alerts, assistant, report
     services/
-      datastore.py     Data access. Local mode reads data/output/*.csv; catalyst mode uses the SDK.
+      datastore.py     Raw table access. Local mode reads data/output/<Table>.csv; catalyst mode uses the SDK.
+      firdata.py       ERD joins: cached denormalised case view + entity-resolved accused index.
+                       Routers read these views, never raw tables directly.
       llm.py           THE gate for all LLM calls (QuickML provider + mock provider).
 functions/             Cron/Event serverless jobs (Phase 1+). Each subfolder = one function.
 frontend/
@@ -50,15 +56,15 @@ frontend/
     components/Layout.tsx
     pages/             One page per pillar.
 data/
-  generator/generate_synthetic.py   Synthetic Karnataka dataset (stdlib only).
-  output/                            Generated CSVs (gitignored).
+  generator/generate_synthetic.py   Synthetic Police FIR dataset per the ERD (stdlib only).
+  output/                            Generated CSVs, one per ERD table (gitignored).
 ```
 
 ## Commands
 
 ```powershell
 # Data
-python data/generator/generate_synthetic.py --incidents 20000 --seed 42
+python data/generator/generate_synthetic.py --cases 20000 --seed 42
 
 # Backend (local dev: serves the generated CSVs, no Catalyst needed)
 cd backend; python -m venv .venv; .\.venv\Scripts\Activate.ps1
@@ -80,9 +86,15 @@ catalyst login; catalyst init; catalyst deploy
 - **Frontend:** React function components + hooks, TanStack Query for server state, Tailwind for styling. Maps = MapLibre GL JS, graph = Cytoscape.js, charts = Recharts.
 - **Secrets** via env vars only (`.env`, gitignored; see `.env.example`). Never commit a Catalyst `project_id` or keys.
 
-## Data model (see `project_tech_stack.md` §5)
-Core: `incidents`, `persons`, `incident_persons`, `locations`.
+## Data model (see `ERD_SCHEMA.md` — strict, from the official FIR ERD)
+Core (26 ERD tables): `CaseMaster` hub + party tables (`ComplainantDetails`, `Victim`,
+`Accused`, `ArrestSurrender`, `ChargesheetDetails`, `ActSectionAssociation`), legal masters
+(`Act`, `Section`, `CrimeHead`, `CrimeSubHead`, `CrimeHeadActSection`), lookups
+(`CaseCategory`, `GravityOffence`, `CaseStatusMaster`, `CasteMaster`, `ReligionMaster`,
+`OccupationMaster`), and organisation (`State`, `District`, `Unit`, `UnitType`, `Rank`,
+`Designation`, `Employee`, `Court`).
 Precomputed by jobs: `graph_edges`, `hotspot_cells`, `district_stats`, `risk_scores`, `trend_baselines`, `anomalies`, `alerts`.
+Accused identity across FIRs is resolved analytics-side by (AccusedName, GenderID) — never add columns to the ERD tables.
 
 ## Build phases (current: Phase 0 — Foundation)
 0. Foundation: scaffold, auth, deploy skeletons, synthetic data. ← we are here

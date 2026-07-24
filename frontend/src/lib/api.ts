@@ -1,4 +1,4 @@
-// Typed API client.
+// Typed API client for the FIR-ERD backend.
 // - Dev: leave VITE_API_BASE unset → relative paths, Vite proxies /api + /health to :9000.
 // - Prod (SPA on Slate, API on AppSail): set VITE_API_BASE to the API origin at build time,
 //   e.g. VITE_API_BASE=https://<project>.catalystserverless.com  (or your API Gateway URL).
@@ -20,74 +20,146 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface DistrictCount { district: string; incidents: number; }
-export interface HotspotCell { lat: number; lon: number; count: number; }
-export interface HourCount { hour: number; count: number; }
-export interface OffenderCount { person_id: string; name: string; gender?: string; incidents: number; }
-export interface RiskScore {
-  district: string; incidents: number; socio_economic_index: number; risk_score: number;
+// --- shared shapes ---
+export interface NameCount { name: string; count: number }
+export interface GroupCount { group: string; count: number }
+export interface HourCount { hour: number; count: number }
+export interface MonthCount { month: string; count: number }
+
+// --- cases ---
+export interface CaseRow {
+  id: number; crime_no: string; case_no: string; category: string; gravity: string;
+  head: string; sub_head: string; status: string; district: string; station: string;
+  registered: string; incident: string; sections: string[];
+  n_victims: number; n_accused: number; n_arrests: number; cstype: string;
+  lat: number | null; lon: number | null;
 }
-export interface EgoNode {
-  id: string; name: string; gender: string; incidents: number; is_root: boolean;
-}
-export interface EgoEdge { source: string; target: string; weight: number }
-export interface EgoGraph {
-  root: string;
-  nodes: EgoNode[];
-  edges: EgoEdge[];
+export interface Meta {
+  districts: string[]; heads: string[]; sub_heads: string[];
+  categories: string[]; statuses: string[];
 }
 
-// --- Person profile ---
+// --- analytics ---
+export interface Summary {
+  total_cases: number; fir_cases: number; districts: number; police_stations: number;
+  chargesheet_rate: number; pendency_rate: number; conviction_rate: number;
+  heinous_share: number; cyber_share: number; avg_report_delay_days: number;
+  median_days_to_chargesheet: number; arrests_total: number; repeat_offenders: number;
+  top_district: string | null; top_district_count: number;
+  top_sub_head: string | null; top_sub_head_count: number;
+}
+export interface CrimeHeadCount { crime_head: string; count: number }
+export interface SubHeadCount {
+  sub_head: string; crime_head: string; count: number;
+  heinous_share: number; chargesheet_rate: number;
+}
+export interface CategoryCount { category: string; count: number }
+export interface GravityCount { gravity: string; count: number }
+export interface StatusCount { status: string; count: number; in_court: boolean }
+export interface FunnelStage { stage: string; count: number }
+export interface FunnelLeak { label: string; count: number }
+export interface CaseFunnel { stages: FunnelStage[]; leakage: FunnelLeak[] }
+export type MonthPoint = { month: string; total: number } & Record<string, number | string>;
+export interface SectionCount {
+  act: string; section: string; label: string; description: string; count: number;
+}
+export interface ArrestAnalytics {
+  total: number; arrests: number; surrenders: number; out_of_state: number;
+  by_month: MonthCount[];
+  days_to_arrest_by_head: { crime_head: string; median_days_to_arrest: number; arrained_cases: number }[];
+  top_districts: { district: string; count: number }[];
+}
+export interface OfficerRow {
+  employee_id: number; name: string; rank: string; station: string; district: string;
+  chargesheets: number; arrests: number; chargesheet_success: number;
+}
+export interface OfficerWorkload {
+  total_employees: number; active_investigators: number;
+  by_rank: { rank: string; count: number }[]; top: OfficerRow[];
+}
+export interface CourtRow {
+  court: string; district: string; cases: number;
+  pending_trial: number; convicted: number; acquitted: number;
+}
+export interface Demographics {
+  victim_age_groups: GroupCount[]; accused_age_groups: GroupCount[];
+  victim_gender: GroupCount[]; accused_gender: GroupCount[];
+  police_victims: number;
+  complainant_occupation: GroupCount[]; complainant_religion: GroupCount[];
+  complainant_caste: GroupCount[]; complainant_gender: GroupCount[];
+}
+export interface InvestigationTiming {
+  report_delay: { sub_head: string; avg_days: number; cases: number }[];
+  days_to_chargesheet: { crime_head: string; median_days: number; cases: number }[];
+}
+
+// --- hotspots ---
+export interface DistrictCount { district: string; cases: number }
+export interface HotspotCell { lat: number; lon: number; count: number }
+export interface DistrictStat {
+  district: string; cases: number; heinous_share: number; chargesheet_rate: number;
+  pendency_rate: number; recent_90d: number; risk_score: number;
+  lat: number | null; lon: number | null;
+}
+export interface StationBreakdown {
+  district: string; total: number;
+  stations: { station: string; cases: number; heinous: number; lat: number | null; lon: number | null }[];
+  by_type: NameCount[];
+  by_hour: HourCount[];
+}
+
+// --- network / person ---
+export interface OffenderCount {
+  person_id: string; name: string; gender: string; cases: number;
+  arrests: number; districts: number; associates: number;
+}
+export interface EgoNode { id: string; name: string; gender: string; cases: number; is_root: boolean }
+export interface EgoEdge { source: string; target: string; weight: number }
+export interface EgoGraph { root: string; nodes: EgoNode[]; edges: EgoEdge[] }
+
 export interface CrimeRow {
-  id: string; crime_type: string; crime_head: string; ipc_section: string;
-  severity: string; district: string; datetime: string; status: string;
-  mo_tags: string; weapon: string; lat: number | null; lon: number | null;
+  id: number; crime_no: string; sub_head: string; head: string; gravity: string;
+  sections: string[]; district: string; station: string; datetime: string;
+  status: string; cstype: string; lat: number | null; lon: number | null;
 }
 export interface Associate {
   person_id: string; name: string; gender: string; shared: number; top_shared_crime: string;
 }
-export interface NameCount { name: string; count: number }
+export interface ArrestEvent {
+  date: string; type: string; district: string; state: string;
+  crime_no: string; sub_head: string;
+}
 export interface TimelinePoint { month: string; count: number }
 export interface PersonProfile {
-  person: {
-    id: string; name: string; age: number | null; age_group: string;
-    gender: string; address_district: string; role: string;
-  };
+  person: { id: string; name: string; gender: string; age: number | null; districts: string[] };
   stats: {
-    total_incidents: number; as_victim: number; first_seen: string | null;
-    last_seen: string | null; districts: string[]; co_offenders: number;
-    clearance_rate: number; weapon_incidents: number; top_crime: string | null;
+    total_cases: number; heinous_cases: number; first_seen: string | null;
+    last_seen: string | null; districts: string[]; co_accused: number;
+    arrests: number; surrenders: number; chargesheet_rate: number; top_crime: string | null;
   };
   threat: { score: number; level: string };
   crimes: CrimeRow[];
+  arrest_history: ArrestEvent[];
   timeline: TimelinePoint[];
-  crime_mix: { by_type: NameCount[]; by_severity: NameCount[] };
-  top_mo: NameCount[];
+  crime_mix: { by_type: NameCount[]; by_head: NameCount[] };
+  top_sections: NameCount[];
   associates: Associate[];
 }
 export interface RelationshipShared {
-  id: string; crime_type: string; severity: string; district: string; datetime: string; status: string;
+  id: number; crime_no: string; sub_head: string; gravity: string;
+  district: string; datetime: string; status: string;
 }
 export interface Relationship { a: string; b: string; shared: RelationshipShared[] }
 
-// --- Alerts / anomalies / district drill-down ---
+// --- alerts / anomalies ---
 export interface SpikeAlert {
-  district: string; crime_type: string; recent: number; baseline: number;
-  ratio: number; z: number; severity: string; lat: number | null; lon: number | null; last_seen: string;
+  district: string; sub_head: string; recent: number; baseline: number;
+  ratio: number; z: number; severity: string; lat: number | null; lon: number | null;
+  last_seen: string;
 }
 export interface Anomaly {
   kind: string; subject: string; period: string; observed: number;
   expected: number; z: number; severity: string; description: string;
-}
-export interface DistrictStat {
-  district: string; incidents: number; socio_economic_index: number; risk_score: number;
-  population: number | null; urban_rural: string; lat: number | null; lon: number | null;
-}
-export interface StationBreakdown {
-  district: string; total: number;
-  stations: { station: string; incidents: number; lat: number | null; lon: number | null }[];
-  by_type: NameCount[];
-  by_hour: HourCount[];
 }
 
 // --- AI intelligence report ---
@@ -96,8 +168,8 @@ export interface IntelReport {
   scope: string; subject: string; subject_id: string | null; generated_at: string;
   narrative: string; provider: string; model: string;
   kpis: ReportKpi[];
-  hotspots: { district: string; incidents: number; risk_score: number }[];
-  offenders: { person_id: string; name: string; incidents: number }[];
+  hotspots: { district: string; cases: number; risk_score: number }[];
+  offenders: { person_id: string; name: string; cases: number }[];
   alerts: SpikeAlert[];
   anomalies: Anomaly[];
 }
@@ -105,59 +177,49 @@ export interface AskResponse {
   question: string; answer: string; provider: string; model: string; grounded_on: string[];
 }
 
-// --- Enriched analytics ---
-export interface Summary {
-  total_incidents: number; districts: number; crime_types: number;
-  clearance_rate: number; cyber_share: number; severe_share: number;
-  weapon_share: number; avg_fir_delay: number;
-  top_district: string | null; top_district_count: number;
-  top_crime: string | null; top_crime_count: number;
-}
-export interface CrimeTypeCount {
-  crime_type: string; crime_head: string; severity: string; count: number;
-}
-export interface CrimeHeadCount { crime_head: string; count: number; }
-export interface StatusCount { status: string; count: number; cleared: boolean; }
-export interface SeverityCount { severity: string; count: number; }
-export type MonthPoint = { month: string; total: number } & Record<string, number | string>;
-export interface GroupCount { group: string; count: number; }
-export interface GenderCount { gender: string; count: number; }
-export interface Demographics {
-  victim_age_groups: GroupCount[];
-  offender_age_groups: GroupCount[];
-  victim_gender: GenderCount[];
-  offender_gender: GenderCount[];
-  urban_rural: GroupCount[];
-}
-
 export const api = {
-  health: () => get<{ status: string; data_mode: string; incidents_loaded: number }>("/health"),
-  meta: () => get<{ districts: string[]; crime_types: string[] }>("/api/incidents/meta"),
+  health: () => get<{ status: string; data_mode: string; cases_loaded: number }>("/health"),
+  meta: () => get<Meta>("/api/cases/meta"),
+  cases: (params: string = "") => get<{ total: number; items: CaseRow[] }>("/api/cases" + params),
+
+  // Analytics
+  summary: () => get<Summary>("/api/analytics/summary"),
+  byCrimeHead: () => get<{ items: CrimeHeadCount[] }>("/api/analytics/by-crime-head"),
+  bySubHead: () => get<{ items: SubHeadCount[] }>("/api/analytics/by-sub-head"),
+  byCategory: () => get<{ items: CategoryCount[] }>("/api/analytics/by-category"),
+  byGravity: () => get<{ items: GravityCount[] }>("/api/analytics/by-gravity"),
+  byStatus: () =>
+    get<{ items: StatusCount[]; chargesheet_rate: number; pendency_rate: number }>("/api/analytics/by-status"),
+  caseFunnel: () => get<CaseFunnel>("/api/analytics/case-funnel"),
+  byMonth: () => get<{ heads: string[]; items: MonthPoint[] }>("/api/analytics/by-month"),
+  topSections: () => get<{ items: SectionCount[] }>("/api/analytics/top-sections"),
+  arrests: () => get<ArrestAnalytics>("/api/analytics/arrests"),
+  officers: () => get<OfficerWorkload>("/api/analytics/officers"),
+  courts: () => get<{ total_courts: number; items: CourtRow[] }>("/api/analytics/courts"),
+  demographics: () => get<Demographics>("/api/analytics/demographics"),
+  investigation: () => get<InvestigationTiming>("/api/analytics/investigation"),
+
+  // Hotspots
   byDistrict: () => get<{ items: DistrictCount[] }>("/api/hotspots/by-district"),
   cells: () => get<{ items: HotspotCell[] }>("/api/hotspots/cells"),
-  byHour: (crime?: string) =>
-    get<{ items: HourCount[] }>("/api/hotspots/by-hour" + (crime ? `?crime_type=${encodeURIComponent(crime)}` : "")),
+  byHour: (subHead?: string) =>
+    get<{ items: HourCount[] }>("/api/hotspots/by-hour" + (subHead ? `?sub_head=${encodeURIComponent(subHead)}` : "")),
+  districts: () => get<{ items: DistrictStat[] }>("/api/hotspots/districts"),
+  stations: (district: string) =>
+    get<StationBreakdown>(`/api/hotspots/stations?district=${encodeURIComponent(district)}`),
+
+  // Network
   topOffenders: () => get<{ items: OffenderCount[] }>("/api/network/top-offenders"),
   ego: (personId: string) => get<EgoGraph>(`/api/network/ego/${personId}`),
   person: (personId: string) => get<PersonProfile>(`/api/network/person/${personId}`),
   relationship: (a: string, b: string) => get<Relationship>(`/api/network/relationship/${a}/${b}`),
-  riskScores: () => get<{ method: string; items: RiskScore[] }>("/api/predictive/risk-scores"),
-  ask: (question: string) => post<AskResponse>("/api/assistant/ask", { question }),
 
-  // Enriched analytics
-  summary: () => get<Summary>("/api/analytics/summary"),
-  byCrimeType: () => get<{ items: CrimeTypeCount[] }>("/api/analytics/by-crime-type"),
-  byCrimeHead: () => get<{ items: CrimeHeadCount[] }>("/api/analytics/by-crime-head"),
-  byStatus: () => get<{ items: StatusCount[]; clearance_rate: number }>("/api/analytics/by-status"),
-  bySeverity: () => get<{ items: SeverityCount[] }>("/api/analytics/by-severity"),
-  byMonth: () => get<{ heads: string[]; items: MonthPoint[] }>("/api/analytics/by-month"),
-  demographics: () => get<Demographics>("/api/analytics/demographics"),
-
-  // Alerts, anomalies, district drill-down
-  spikes: () => get<{ count: number; items: SpikeAlert[] }>("/api/alerts/spikes"),
+  // Predictive / alerts
+  riskScores: () => get<{ method: string; items: DistrictStat[] }>("/api/predictive/risk-scores"),
   anomalies: () => get<{ method: string; count: number; items: Anomaly[] }>("/api/predictive/anomalies"),
-  districts: () => get<{ items: DistrictStat[] }>("/api/hotspots/districts"),
-  stations: (district: string) =>
-    get<StationBreakdown>(`/api/hotspots/stations?district=${encodeURIComponent(district)}`),
+  spikes: () => get<{ count: number; items: SpikeAlert[] }>("/api/alerts/spikes"),
+
+  // NL query + report
+  ask: (question: string) => post<AskResponse>("/api/assistant/ask", { question }),
   report: (scope: string, id?: string) => post<IntelReport>("/api/report", { scope, id }),
 };

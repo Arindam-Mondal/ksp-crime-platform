@@ -1,82 +1,53 @@
 """
-Pillar 2 — network / link analysis + person intelligence.
+Pillar 2 — criminological network / link analysis + person intelligence.
 
-Production: serve the precomputed `graph_edges` table (networkx centrality computed
-by a Cron/Event job). Phase 0 scaffold: build co-offender graphs and per-person
-briefings on the fly from `incident_persons` + `incidents`. A single person's slice
-is tiny, so these joins stay well under the 300-row Catalyst cap.
+Built on the entity-resolved accused index (services/firdata.offenders()): Accused
+rows are per-case in the ERD, so the same physical person across FIRs is resolved by
+(name, gender) — mirroring real name-based entity resolution on FIR data. Production
+serves the precomputed `graph_edges` table; a single person's slice is tiny either way.
 """
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 
-from app.services.datastore import get_store
+from app.services import firdata
 
 router = APIRouter(prefix="/api/network", tags=["network"])
-
-SEVERITY_WEIGHT = {"Low": 1, "Medium": 2, "High": 3, "Severe": 5}
-CLEARED = {"Charge-sheeted", "Closed"}
-
-
-def _offenders_by_incident() -> dict[str, list[str]]:
-    links = get_store().rows("incident_persons")
-    by_incident: dict[str, list[str]] = defaultdict(list)
-    for l in links:
-        if l.get("role") == "offender":
-            by_incident[l["incident_id"]].append(l["person_id"])
-    return by_incident
-
-
-def _offender_incident_counts() -> Counter:
-    links = get_store().rows("incident_persons")
-    return Counter(l["person_id"] for l in links if l.get("role") == "offender")
-
-
-def _adjacency(by_incident: dict[str, list[str]]) -> dict[str, Counter]:
-    """person -> Counter of co-offenders weighted by shared incidents."""
-    adj: dict[str, Counter] = defaultdict(Counter)
-    for offenders in by_incident.values():
-        for i in range(len(offenders)):
-            for j in range(i + 1, len(offenders)):
-                a, b = offenders[i], offenders[j]
-                adj[a][b] += 1
-                adj[b][a] += 1
-    return adj
 
 
 @router.get("/top-offenders")
 def top_offenders(limit: int = 20):
-    """Repeat offenders ranked by incident count."""
-    counts = _offender_incident_counts()
-    persons = {p["id"]: p for p in get_store().rows("persons")}
-    items = [
-        {
-            "person_id": pid,
-            "name": persons.get(pid, {}).get("name", pid),
-            "gender": persons.get(pid, {}).get("gender", "M"),
-            "incidents": n,
-        }
-        for pid, n in counts.most_common(limit)
-    ]
+    """Repeat offenders (resolved identities) ranked by linked FIR count."""
+    off = firdata.offenders()["by_id"]
+    adj = firdata.co_accused_adjacency()
+    items = []
+    for oid, g in off.items():
+        if g["n_cases"] < 2:
+            break  # by_id is ordered by case count
+        items.append({
+            "person_id": oid,
+            "name": g["name"],
+            "gender": g["gender"],
+            "cases": g["n_cases"],
+            "arrests": g["arrests"] + g["surrenders"],
+            "districts": len(g["districts"]),
+            "associates": len(adj.get(oid, {})),
+        })
+        if len(items) >= limit:
+            break
     return {"items": items}
 
 
 @router.get("/ego/{person_id}")
 def ego_graph(person_id: str, depth: int = 1):
-    """Co-offender graph around a person (nodes + edges for the force graph).
-
-    Nodes carry identity metadata (name, gender, incident count) so the client can
-    render avatars / size nodes without a call per node.
-    """
-    by_incident = _offenders_by_incident()
-    persons = {p["id"]: p for p in get_store().rows("persons")}
-    if person_id not in persons:
+    """Co-accused graph around a person (nodes + edges for the force graph)."""
+    off = firdata.offenders()["by_id"]
+    if person_id not in off:
         raise HTTPException(status_code=404, detail="person not found")
-
-    counts = _offender_incident_counts()
-    adj = _adjacency(by_incident)
+    adj = firdata.co_accused_adjacency()
 
     frontier = {person_id}
     seen = {person_id}
@@ -84,7 +55,7 @@ def ego_graph(person_id: str, depth: int = 1):
     for _ in range(max(1, depth)):
         nxt = set()
         for node in frontier:
-            for neighbor, weight in adj[node].items():
+            for neighbor, weight in adj.get(node, {}).items():
                 edges.append({"source": node, "target": neighbor, "weight": weight})
                 if neighbor not in seen:
                     seen.add(neighbor)
@@ -93,134 +64,121 @@ def ego_graph(person_id: str, depth: int = 1):
 
     nodes = [
         {
-            "id": pid,
-            "name": persons.get(pid, {}).get("name", pid),
-            "gender": persons.get(pid, {}).get("gender", "M"),
-            "incidents": counts.get(pid, 0),
-            "is_root": pid == person_id,
+            "id": oid,
+            "name": off[oid]["name"],
+            "gender": off[oid]["gender"],
+            "cases": off[oid]["n_cases"],
+            "is_root": oid == person_id,
         }
-        for pid in seen
+        for oid in seen
     ]
-    # de-dup undirected edges
     uniq = {tuple(sorted((e["source"], e["target"]))): e for e in edges}
     return {"root": person_id, "nodes": nodes, "edges": list(uniq.values())}
 
 
-def _person_incident_ids(person_id: str, role: str = "offender") -> list[str]:
-    links = get_store().rows("incident_persons")
-    return [l["incident_id"] for l in links if l.get("person_id") == person_id and l.get("role") == role]
-
-
 @router.get("/person/{person_id}")
 def person_profile(person_id: str):
-    """Self-contained briefing for one person: identity, stats, threat, crimes,
-    timeline, crime mix, MO tags, and ranked associates."""
-    persons = {p["id"]: p for p in get_store().rows("persons")}
-    person = persons.get(person_id)
-    if not person:
+    """Self-contained briefing: identity, stats, threat, linked FIRs, arrest history,
+    sections invoked, timeline, and ranked associates."""
+    off = firdata.offenders()
+    g = off["by_id"].get(person_id)
+    if not g:
         raise HTTPException(status_code=404, detail="person not found")
+    cidx = firdata.case_index()
+    arr_by_accused = firdata.arrests()["by_accused"]
+    adj = firdata.co_accused_adjacency()
 
-    incidents = {r["id"]: r for r in get_store().rows("incidents")}
-    offender_ids = _person_incident_ids(person_id, "offender")
-    victim_ids = _person_incident_ids(person_id, "victim")
-    crimes = [incidents[i] for i in offender_ids if i in incidents]
-
-    # --- crime rows (powers the table + the map) ---
+    crimes = [cidx[c] for c in g["case_ids"] if c in cidx]
+    crimes.sort(key=lambda c: c["incident"], reverse=True)
     crime_rows = [
         {
-            "id": c["id"],
-            "crime_type": c.get("crime_type", ""),
-            "crime_head": c.get("crime_head", ""),
-            "ipc_section": c.get("ipc_section", ""),
-            "severity": c.get("severity", "Medium"),
-            "district": c.get("district", ""),
-            "datetime": c.get("datetime", ""),
-            "status": c.get("status", ""),
-            "mo_tags": c.get("mo_tags", ""),
-            "weapon": c.get("weapon", "No"),
-            "lat": float(c["lat"]) if c.get("lat") else None,
-            "lon": float(c["lon"]) if c.get("lon") else None,
+            "id": c["id"], "crime_no": c["crime_no"], "sub_head": c["sub_head"],
+            "head": c["head"], "gravity": c["gravity"], "sections": c["sections"],
+            "district": c["district"], "station": c["station"],
+            "datetime": c["incident"], "status": c["status"], "cstype": c["cstype"],
+            "lat": c["lat"], "lon": c["lon"],
         }
         for c in crimes
     ]
-    crime_rows.sort(key=lambda r: r["datetime"], reverse=True)
 
-    # --- stats ---
-    dates = sorted(c["datetime"] for c in crimes if c.get("datetime"))
-    districts = sorted({c.get("district", "") for c in crimes if c.get("district")})
-    crime_types = Counter(c.get("crime_type", "") for c in crimes)
-    severities = Counter(c.get("severity", "Medium") for c in crimes)
-    weapon_used = sum(1 for c in crimes if c.get("weapon") == "Yes")
-    cleared = sum(1 for c in crimes if c.get("status") in CLEARED)
+    dates = sorted(c["incident"] for c in crimes if c["incident"])
+    sub_counts = Counter(c["sub_head"] for c in crimes)
+    head_counts = Counter(c["head"] for c in crimes)
+    heinous = sum(1 for c in crimes if c["heinous"])
+    charged = sum(1 for c in crimes if c["cstype"] == "A")
+    finals = sum(1 for c in crimes if c["cstype"])
 
-    # --- associates (co-offenders by shared incidents) ---
-    by_incident = _offenders_by_incident()
-    adj = _adjacency(by_incident)
-    # top shared crime per associate
-    shared_crimes: dict[str, Counter] = defaultdict(Counter)
-    for iid in offender_ids:
-        co = [o for o in by_incident.get(iid, []) if o != person_id]
-        ctype = incidents.get(iid, {}).get("crime_type", "")
+    # arrest history from this identity's accused rows
+    arrest_events = []
+    for arid in g["accused_row_ids"]:
+        ev = arr_by_accused.get(arid)
+        if ev:
+            c = cidx.get(ev["case_id"], {})
+            arrest_events.append({
+                "date": ev["date"], "type": ev["type"], "district": ev["district"],
+                "state": ev["state"], "crime_no": c.get("crime_no", ""),
+                "sub_head": c.get("sub_head", ""),
+            })
+    arrest_events.sort(key=lambda a: a["date"], reverse=True)
+
+    # associates (shared cases via resolved co-accused graph)
+    shared_subs: dict[str, Counter] = defaultdict(Counter)
+    for cid in g["case_ids"]:
+        co = [o for o in off["by_case"].get(cid, []) if o != person_id]
+        sub = cidx.get(cid, {}).get("sub_head", "")
         for o in co:
-            shared_crimes[o][ctype] += 1
+            shared_subs[o][sub] += 1
     associates = []
-    for pid, shared in adj[person_id].most_common():
-        top_shared = shared_crimes[pid].most_common(1)
+    for oid, shared in sorted(adj.get(person_id, {}).items(), key=lambda kv: -kv[1]):
+        top_shared = shared_subs[oid].most_common(1)
+        other = off["by_id"][oid]
         associates.append({
-            "person_id": pid,
-            "name": persons.get(pid, {}).get("name", pid),
-            "gender": persons.get(pid, {}).get("gender", "M"),
-            "shared": shared,
-            "top_shared_crime": top_shared[0][0] if top_shared else "",
+            "person_id": oid, "name": other["name"], "gender": other["gender"],
+            "shared": shared, "top_shared_crime": top_shared[0][0] if top_shared else "",
         })
 
-    # --- timeline (monthly) ---
-    months = Counter(c["datetime"][:7] for c in crimes if len(c.get("datetime", "")) >= 7)
+    months = Counter(c["incident"][:7] for c in crimes if len(c["incident"]) >= 7)
     timeline = [{"month": m, "count": months[m]} for m in sorted(months)]
 
-    # --- threat heuristic (transparent) ---
-    sev_points = sum(SEVERITY_WEIGHT.get(c.get("severity", "Medium"), 2) for c in crimes)
-    threshold = _recent_month()
-    recent = sum(v for m, v in months.items() if m >= threshold)
-    weapon_ratio = weapon_used / len(crimes) if crimes else 0
-    raw = sev_points * 1.4 + recent * 3 + weapon_ratio * 25
+    sections = Counter(s for c in crimes for s in c["sections"])
+
+    # threat heuristic (transparent): gravity mix + recency + arrest pressure
+    recent_cut = (datetime.now() - timedelta(days=90)).strftime("%Y-%m")
+    recent = sum(v for m, v in months.items() if m >= recent_cut)
+    raw = heinous * 9 + (len(crimes) - heinous) * 2.5 + recent * 6 + len(adj.get(person_id, {})) * 2
     threat_score = max(0, min(100, round(raw)))
     threat_level = "High" if threat_score >= 66 else "Medium" if threat_score >= 33 else "Low"
 
+    ages = sorted(g["ages"])
     return {
         "person": {
-            "id": person["id"],
-            "name": person.get("name", person_id),
-            "age": int(person["age"]) if str(person.get("age", "")).isdigit() else None,
-            "age_group": person.get("age_group", ""),
-            "gender": person.get("gender", "M"),
-            "address_district": person.get("address_district", ""),
-            "role": person.get("role", ""),
+            "id": person_id,
+            "name": g["name"],
+            "gender": g["gender"],
+            "age": ages[-1] if ages else None,
+            "districts": g["districts"],
         },
         "stats": {
-            "total_incidents": len(crimes),
-            "as_victim": len(victim_ids),
+            "total_cases": len(crimes),
+            "heinous_cases": heinous,
             "first_seen": dates[0] if dates else None,
             "last_seen": dates[-1] if dates else None,
-            "districts": districts,
-            "co_offenders": len(adj[person_id]),
-            "clearance_rate": round(cleared / len(crimes) * 100, 1) if crimes else 0,
-            "weapon_incidents": weapon_used,
-            "top_crime": crime_types.most_common(1)[0][0] if crime_types else None,
+            "districts": g["districts"],
+            "co_accused": len(adj.get(person_id, {})),
+            "arrests": g["arrests"],
+            "surrenders": g["surrenders"],
+            "chargesheet_rate": round(charged / finals * 100, 1) if finals else 0,
+            "top_crime": sub_counts.most_common(1)[0][0] if sub_counts else None,
         },
         "threat": {"score": threat_score, "level": threat_level},
         "crimes": crime_rows,
+        "arrest_history": arrest_events,
         "timeline": timeline,
         "crime_mix": {
-            "by_type": [{"name": k, "count": v} for k, v in crime_types.most_common()],
-            "by_severity": [{"name": k, "count": v} for k, v in severities.most_common()],
+            "by_type": [{"name": k, "count": v} for k, v in sub_counts.most_common()],
+            "by_head": [{"name": k, "count": v} for k, v in head_counts.most_common()],
         },
-        "top_mo": [
-            {"name": k, "count": v}
-            for k, v in Counter(
-                t for c in crimes for t in c.get("mo_tags", "").split("|") if t
-            ).most_common(8)
-        ],
+        "top_sections": [{"name": k, "count": v} for k, v in sections.most_common(8)],
         "associates": associates,
     }
 
@@ -228,28 +186,18 @@ def person_profile(person_id: str):
 @router.get("/relationship/{a}/{b}")
 def relationship(a: str, b: str):
     """The shared FIRs that link two people (the 'how they're connected' detail)."""
-    incidents = {r["id"]: r for r in get_store().rows("incidents")}
-    a_ids = set(_person_incident_ids(a, "offender"))
-    b_ids = set(_person_incident_ids(b, "offender"))
-    shared_ids = a_ids & b_ids
+    off = firdata.offenders()["by_id"]
+    if a not in off or b not in off:
+        raise HTTPException(status_code=404, detail="person not found")
+    cidx = firdata.case_index()
+    shared_ids = set(off[a]["case_ids"]) & set(off[b]["case_ids"])
     shared = [
         {
-            "id": incidents[i]["id"],
-            "crime_type": incidents[i].get("crime_type", ""),
-            "severity": incidents[i].get("severity", "Medium"),
-            "district": incidents[i].get("district", ""),
-            "datetime": incidents[i].get("datetime", ""),
-            "status": incidents[i].get("status", ""),
+            "id": cid, "crime_no": cidx[cid]["crime_no"], "sub_head": cidx[cid]["sub_head"],
+            "gravity": cidx[cid]["gravity"], "district": cidx[cid]["district"],
+            "datetime": cidx[cid]["incident"], "status": cidx[cid]["status"],
         }
-        for i in shared_ids
-        if i in incidents
+        for cid in shared_ids if cid in cidx
     ]
     shared.sort(key=lambda r: r["datetime"], reverse=True)
     return {"a": a, "b": b, "shared": shared}
-
-
-def _recent_month() -> str:
-    """YYYY-MM threshold ~90 days ago, for the recency component of the threat score."""
-    from datetime import datetime, timedelta
-
-    return (datetime.now() - timedelta(days=90)).strftime("%Y-%m")

@@ -1,6 +1,7 @@
 """
 Pure aggregation functions for the Catalyst Cron/Event jobs (superset mirror of
-`backend/app/services/aggregations.py`). Framework-free; takes list[dict] rows and
+`backend/app/services/aggregations.py`, operating on the denormalised case view built
+by `common/firview.py` from the ERD tables). Framework-free; takes list[dict] rows and
 returns plain rows ready to UPSERT into the Data Store aggregate tables.
 
 Keep the spike/anomaly/district functions in sync with the backend copy. The extra
@@ -13,9 +14,6 @@ import statistics
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
-SEVERITY_WEIGHT = {"Low": 1, "Medium": 2, "High": 3, "Severe": 5}
-CLEARED = {"Charge-sheeted", "Closed"}
-
 
 def _parse(dt: str):
     try:
@@ -24,107 +22,108 @@ def _parse(dt: str):
         return None
 
 
-def _ref_now(incidents):
+def _ref_now(cases):
     latest = None
-    for r in incidents:
-        d = _parse(r.get("datetime", ""))
+    for r in cases:
+        d = _parse(r.get("incident", ""))
         if d and (latest is None or d > latest):
             latest = d
     return latest or datetime.now()
 
 
-def district_centroids(locations):
+def district_centroids(cases):
     acc = defaultdict(list)
-    for l in locations:
-        try:
-            acc[l["district"]].append((float(l["lat"]), float(l["lon"])))
-        except (ValueError, KeyError):
-            continue
+    for c in cases:
+        if c.get("lat") is not None and c.get("lon") is not None:
+            acc[c["district"]].append((c["lat"], c["lon"]))
     return {d: (sum(x[0] for x in pts) / len(pts), sum(x[1] for x in pts) / len(pts))
             for d, pts in acc.items() if pts}
 
 
 # ---------------------------------------------------------- hotspot_cells ----
-def hotspot_cells(incidents, precision: int = 2, top: int = 500):
+def hotspot_cells(cases, precision: int = 2, top: int = 500):
     grid = defaultdict(int)
-    for r in incidents:
-        try:
-            key = (round(float(r["lat"]), precision), round(float(r["lon"]), precision))
-        except (ValueError, KeyError):
+    for c in cases:
+        if c.get("lat") is None or c.get("lon") is None:
             continue
-        grid[key] += 1
-    cells = [{"lat": lat, "lon": lon, "count": c} for (lat, lon), c in grid.items()]
+        grid[(round(c["lat"], precision), round(c["lon"], precision))] += 1
+    cells = [{"lat": lat, "lon": lon, "count": n} for (lat, lon), n in grid.items()]
     cells.sort(key=lambda x: x["count"], reverse=True)
     return cells[:top]
 
 
 # ----------------------------------------------------------- district_stats ----
-def district_stats(incidents, locations):
-    counts = Counter(r.get("district", "") for r in incidents)
-    max_count = max(counts.values()) if counts else 1
-    meta, sei_acc = {}, defaultdict(list)
-    for l in locations:
-        d = l.get("district", "")
-        try:
-            sei_acc[d].append(float(l["socio_economic_index"]))
-        except (ValueError, KeyError):
-            pass
-        meta.setdefault(d, {"population": l.get("population"), "urban_rural": l.get("urban_rural", "")})
-    centroids = district_centroids(locations)
+def district_stats(cases):
+    """Per-district rollup: volume, heinous share, chargesheet rate, pendency, risk."""
+    ref = _ref_now(cases)
+    recent_cut = ref - timedelta(days=90)
+    by_d = defaultdict(list)
+    for c in cases:
+        if c.get("district"):
+            by_d[c["district"]].append(c)
+    max_count = max((len(v) for v in by_d.values()), default=1)
+    centroids = district_centroids(cases)
+
     items = []
-    for district, n in counts.items():
-        vals = sei_acc.get(district, [0.5])
-        avg_sei = sum(vals) / len(vals)
-        risk = round(0.7 * (n / max_count) + 0.3 * (1 - avg_sei), 3)
+    for district, rows in by_d.items():
+        n = len(rows)
+        heinous = sum(1 for c in rows if c.get("heinous"))
+        finals = [c for c in rows if c.get("cstype")]
+        charged = sum(1 for c in finals if c["cstype"] == "A")
+        open_n = sum(1 for c in rows if c.get("status_id") == 1)
+        recent = sum(1 for c in rows if (_parse(c.get("incident", "")) or ref) > recent_cut)
+        heinous_share = heinous / n if n else 0
+        cs_rate = charged / len(finals) if finals else 0
+        pendency = open_n / n if n else 0
+        risk = round(0.40 * (n / max_count) + 0.25 * heinous_share
+                     + 0.20 * pendency + 0.15 * min(1.0, recent / max(1, n * 0.2)), 3)
         lat, lon = centroids.get(district, (None, None))
-        items.append({"district": district, "incidents": n,
-                      "socio_economic_index": round(avg_sei, 3), "risk_score": risk,
-                      "population": meta.get(district, {}).get("population"),
-                      "urban_rural": meta.get(district, {}).get("urban_rural", ""),
-                      "lat": lat, "lon": lon})
-    items.sort(key=lambda x: x["incidents"], reverse=True)
+        items.append({"district": district, "cases": n,
+                      "heinous_share": round(heinous_share * 100, 1),
+                      "chargesheet_rate": round(cs_rate * 100, 1),
+                      "pendency_rate": round(pendency * 100, 1),
+                      "recent_90d": recent, "risk_score": risk, "lat": lat, "lon": lon})
+    items.sort(key=lambda x: x["cases"], reverse=True)
     return items
 
 
-def risk_scores(incidents, locations):
+def risk_scores(cases):
     """risk_scores table (Zia AutoML stand-in: transparent heuristic)."""
-    return [{"district": d["district"], "incidents": d["incidents"],
-             "socio_economic_index": d["socio_economic_index"], "risk_score": d["risk_score"]}
-            for d in district_stats(incidents, locations)]
+    return district_stats(cases)
 
 
 # ------------------------------------------------ trend_baselines + alerts ----
-def trend_baselines(incidents):
-    """Per (district, crime_type) monthly baseline (mean, std)."""
+def trend_baselines(cases):
+    """Per (district, sub_head) monthly baseline (mean, std)."""
     groups = defaultdict(Counter)  # key -> month -> count
-    for r in incidents:
-        d = _parse(r.get("datetime", ""))
+    for c in cases:
+        d = _parse(c.get("incident", ""))
         if d:
-            groups[(r.get("district", ""), r.get("crime_type", ""))][d.strftime("%Y-%m")] += 1
+            groups[(c.get("district", ""), c.get("sub_head", ""))][d.strftime("%Y-%m")] += 1
     out = []
-    for (district, crime), months in groups.items():
+    for (district, sub), months in groups.items():
         counts = list(months.values())
         if len(counts) < 2:
             continue
         mean = sum(counts) / len(counts)
-        out.append({"district": district, "crime_type": crime,
+        out.append({"district": district, "sub_head": sub,
                     "baseline_mean": round(mean, 2),
                     "baseline_std": round(statistics.pstdev(counts), 2),
                     "months_observed": len(counts)})
     return out
 
 
-def spike_alerts(incidents, locations, min_recent: int = 8, ratio_threshold: float = 2.0):
-    ref = _ref_now(incidents)
+def spike_alerts(cases, min_recent: int = 8, ratio_threshold: float = 2.0):
+    ref = _ref_now(cases)
     window_start = ref - timedelta(days=30)
-    centroids = district_centroids(locations)
+    centroids = district_centroids(cases)
     groups = defaultdict(list)
-    for r in incidents:
-        d = _parse(r.get("datetime", ""))
+    for c in cases:
+        d = _parse(c.get("incident", ""))
         if d:
-            groups[(r.get("district", ""), r.get("crime_type", ""))].append(d)
+            groups[(c.get("district", ""), c.get("sub_head", ""))].append(d)
     alerts = []
-    for (district, crime), dates in groups.items():
+    for (district, sub), dates in groups.items():
         recent = sum(1 for d in dates if d > window_start)
         if recent < min_recent:
             continue
@@ -140,7 +139,7 @@ def spike_alerts(incidents, locations, min_recent: int = 8, ratio_threshold: flo
             continue
         std = statistics.pstdev(counts) or 1.0
         lat, lon = centroids.get(district, (None, None))
-        alerts.append({"district": district, "crime_type": crime, "recent": recent,
+        alerts.append({"district": district, "sub_head": sub, "recent": recent,
                        "baseline": round(baseline, 1), "ratio": round(ratio, 2),
                        "z": round((recent - baseline) / std, 2),
                        "severity": "Critical" if ratio >= 3 else "Elevated",
@@ -150,13 +149,13 @@ def spike_alerts(incidents, locations, min_recent: int = 8, ratio_threshold: flo
 
 
 # ----------------------------------------------------------- anomalies ----
-def anomalies(incidents, top_n: int = 12):
+def anomalies(cases, top_n: int = 12):
     out = []
     by_dm = defaultdict(Counter)
-    for r in incidents:
-        d = _parse(r.get("datetime", ""))
+    for c in cases:
+        d = _parse(c.get("incident", ""))
         if d:
-            by_dm[r.get("district", "")][d.strftime("%Y-%m")] += 1
+            by_dm[c.get("district", "")][d.strftime("%Y-%m")] += 1
     for district, months in by_dm.items():
         series = list(months.values())
         if len(series) < 6:
@@ -169,43 +168,44 @@ def anomalies(incidents, top_n: int = 12):
                 out.append({"kind": "volume", "subject": district, "period": month,
                             "observed": n, "expected": round(mean, 1), "z": round(z, 2),
                             "severity": "High" if z >= 3.2 else "Medium",
-                            "description": f"{district} logged {n} incidents in {month} — "
+                            "description": f"{district} registered {n} cases in {month} — "
                                            f"{z:.1f}σ above its {mean:.0f}/month norm."})
-    by_ch = defaultdict(Counter)
-    for r in incidents:
-        d = _parse(r.get("datetime", ""))
-        if d:
-            by_ch[r.get("crime_type", "")][d.hour] += 1
-    for crime, hours in by_ch.items():
+    by_sh = defaultdict(Counter)
+    for c in cases:
+        if c.get("hour") is not None:
+            by_sh[c.get("sub_head", "")][c["hour"]] += 1
+    for sub, hours in by_sh.items():
         total = sum(hours.values())
         if total < 50:
             continue
         for hour, n in hours.items():
             p = n / total
             if p < 0.012 and n >= 3:
-                out.append({"kind": "temporal", "subject": crime, "period": f"{hour:02d}:00",
+                out.append({"kind": "temporal", "subject": sub, "period": f"{hour:02d}:00",
                             "observed": n, "expected": round(total / 24, 1),
                             "z": round((p - 1 / 24) / (1 / 24), 2), "severity": "Medium",
-                            "description": f"{n} {crime} incidents at {hour:02d}:00 — unusual "
+                            "description": f"{n} {sub} cases at {hour:02d}:00 — unusual "
                                            f"for this crime ({p*100:.1f}% of its cases)."})
     out.sort(key=lambda a: abs(a["z"]), reverse=True)
     return out[:top_n]
 
 
 # ----------------------------------------------------------- graph_edges ----
-def graph_edges(incident_persons, top: int = 5000):
-    """Co-offender edges (weight = shared incidents). networkx centrality is added in
-    the job; this base function stays dependency-free for portability."""
-    by_incident = defaultdict(list)
-    for l in incident_persons:
-        if l.get("role") == "offender":
-            by_incident[l["incident_id"]].append(l["person_id"])
+def graph_edges(accused_rows, top: int = 5000):
+    """Co-accused edges over name-resolved identities (weight = shared FIRs).
+
+    `accused_rows` are raw Accused-table rows; the same physical person across cases
+    is resolved by (AccusedName, GenderID) — see ERD_SCHEMA.md conventions.
+    networkx centrality is added in the job; this base stays dependency-free."""
+    by_case = defaultdict(set)
+    for a in accused_rows:
+        key = f"{a.get('AccusedName', '')}|{a.get('GenderID', '')}"
+        by_case[a.get("CaseMasterID")].add(key)
     weights = Counter()
-    for offenders in by_incident.values():
-        for i in range(len(offenders)):
-            for j in range(i + 1, len(offenders)):
-                a, b = sorted((offenders[i], offenders[j]))
-                weights[(a, b)] += 1
-    edges = [{"src_person": a, "dst_person": b, "edge_type": "co_offender", "weight": w}
-             for (a, b), w in weights.most_common(top)]
-    return edges
+    for names in by_case.values():
+        ordered = sorted(names)
+        for i in range(len(ordered)):
+            for j in range(i + 1, len(ordered)):
+                weights[(ordered[i], ordered[j])] += 1
+    return [{"src_person": a, "dst_person": b, "edge_type": "co_accused", "weight": w}
+            for (a, b), w in weights.most_common(top)]

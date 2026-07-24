@@ -9,9 +9,9 @@ the API reads the CSVs directly (DATA_MODE=local).
 Usage (after `catalyst login` and tables created in the console / via schema import):
     python backend/scripts/seed_datastore.py --data data/output
 
-Tables expected: incidents, persons, incident_persons, locations (core) +
-the aggregate tables the jobs write (hotspot_cells, district_stats, trend_baselines,
-alerts, risk_scores, anomalies, graph_edges).
+Tables expected: the 26 ERD tables (see ERD_SCHEMA.md) + the aggregate tables the
+jobs write (hotspot_cells, district_stats, trend_baselines, alerts, risk_scores,
+anomalies, graph_edges).
 """
 from __future__ import annotations
 
@@ -19,7 +19,15 @@ import argparse
 import csv
 import os
 
-CORE_TABLES = ["locations", "persons", "incidents", "incident_persons"]
+# Masters first (FK targets), then case data — one CSV per ERD table.
+CORE_TABLES = [
+    "State", "District", "UnitType", "Unit", "Rank", "Designation", "Employee",
+    "Court", "CaseCategory", "GravityOffence", "CaseStatusMaster", "CasteMaster",
+    "ReligionMaster", "OccupationMaster", "CrimeHead", "CrimeSubHead",
+    "Act", "Section", "CrimeHeadActSection",
+    "CaseMaster", "ComplainantDetails", "Victim", "Accused",
+    "ActSectionAssociation", "ArrestSurrender", "ChargesheetDetails",
+]
 CHUNK = 200  # insert_rows batch size
 
 

@@ -70,16 +70,20 @@ Heavy math (DBSCAN/KDE hotspots, networkx centrality, AutoML scoring, anomaly/sp
 
 ---
 
-## 5. Data model (Data Store, synthetic)
+## 5. Data model (Data Store, synthetic — strict per the official FIR ERD)
 
-**Core tables**
-- `incidents` (id, crime_type, ipc_section, district, station, lat, lon, datetime, mo_tags, narrative, status)
-- `persons` (id, role = offender | victim, name, age, gender, address_district)
-- `incident_persons` (incident_id, person_id, role) — link table
-- `locations` (district, station, lat, lon, population, socio_economic_index)
+The challenge organisers provided `Police_FIR_ER_Diagram.pdf`; its schema is transcribed in
+**`ERD_SCHEMA.md`** and is followed exactly (table and column names included).
+
+**Core tables (26, per the ERD)**
+- Hub: `CaseMaster` (CrimeNo/CaseNo, dates, GPS, FKs to every lookup)
+- Parties: `ComplainantDetails`, `Victim`, `Accused`, `ArrestSurrender`, `ChargesheetDetails`
+- Legal: `Act`, `Section`, `ActSectionAssociation`, `CrimeHead`, `CrimeSubHead`, `CrimeHeadActSection`
+- Lookups: `CaseCategory`, `GravityOffence`, `CaseStatusMaster`, `CasteMaster`, `ReligionMaster`, `OccupationMaster`
+- Organisation: `State`, `District`, `Unit`, `UnitType`, `Rank`, `Designation`, `Employee`, `Court`
 
 **Precomputed (written by Cron/Event jobs)**
-- `graph_edges` (src_person, dst_person, edge_type, weight, incident_id)
+- `graph_edges` (src_person, dst_person, edge_type, weight) — co-accused, name-resolved
 - `hotspot_cells`, `district_stats`, `risk_scores`, `trend_baselines`, `anomalies`, `alerts`
 
 ---

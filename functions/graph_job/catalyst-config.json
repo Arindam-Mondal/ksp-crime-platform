@@ -9,5 +9,5 @@
   "execution": {
     "main": "main.handler"
   },
-  "_comment": "Cron or Event (on incident_persons insert via Signals). Writes graph_edges. Reconcile via `catalyst functions:add`."
+  "_comment": "Cron or Event (on Accused insert via Signals). Writes graph_edges. Reconcile via `catalyst functions:add`."
 }

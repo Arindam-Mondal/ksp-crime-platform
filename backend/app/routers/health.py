@@ -13,15 +13,14 @@ router = APIRouter(tags=["health"])
 def health():
     settings = get_settings()
     store = get_store()
-    # In local mode, report whether the synthetic data is present.
-    incidents_loaded = 0
+    cases_loaded = 0
     try:
-        incidents_loaded = len(store.rows("incidents"))
+        cases_loaded = len(store.rows("CaseMaster"))
     except NotImplementedError:
         pass
     return {
         "status": "ok",
         "data_mode": settings.data_mode,
         "llm_provider": settings.llm_provider,
-        "incidents_loaded": incidents_loaded,
+        "cases_loaded": cases_loaded,
     }

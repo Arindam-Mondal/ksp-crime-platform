@@ -46,7 +46,7 @@ export default function Network() {
         icon={Share2}
         eyebrow="Criminological Analysis"
         title="Network & Link Analysis"
-        subtitle="Co-offending associations derived from incident graph edges"
+        subtitle="Co-accused associations across FIRs — identities resolved from the Accused table"
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -83,9 +83,11 @@ export default function Network() {
                       <Avatar id={o.person_id} gender={o.gender} name={o.name} size={34} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-white/90">{o.name}</span>
-                        <span className="tabular block text-[11px] text-muted">{o.person_id}</span>
+                        <span className="tabular block text-[11px] text-muted">
+                          {o.person_id} · {o.districts} district{o.districts === 1 ? "" : "s"} · {o.arrests} arrest{o.arrests === 1 ? "" : "s"}
+                        </span>
                       </span>
-                      <Badge variant={active ? "accent" : "neutral"}>{o.incidents}</Badge>
+                      <Badge variant={active ? "accent" : "neutral"}>{o.cases}</Badge>
                     </button>
                   </li>
                 );
@@ -144,7 +146,7 @@ export default function Network() {
                   </div>
                   <div className="mt-1.5 flex items-center gap-2 text-muted">
                     <span className="h-[3px] w-7 rounded-full bg-gradient-to-r from-[#28344f] to-accent" />
-                    edge thickness = shared incidents
+                    edge thickness = shared FIRs
                   </div>
                 </div>
                 <div className="pointer-events-none absolute bottom-3 right-3 z-10 text-[11px] text-muted">

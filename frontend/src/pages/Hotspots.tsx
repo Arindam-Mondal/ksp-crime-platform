@@ -21,7 +21,7 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
 };
 
 type View = "heat" | "districts";
-type Metric = "risk" | "sei";
+type Metric = "risk" | "cs";
 
 export default function Hotspots() {
   const mapEl = useRef<HTMLDivElement>(null);
@@ -92,14 +92,14 @@ export default function Hotspots() {
     const map = mapRef.current;
     if (!map || !districts.data) return;
     const items = districts.data.items.filter((d) => d.lat != null && d.lon != null);
-    const maxInc = Math.max(1, ...items.map((d) => d.incidents));
+    const maxInc = Math.max(1, ...items.map((d) => d.cases));
     const draw = () => {
       const data: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
         features: items.map((d) => ({
           type: "Feature",
           geometry: { type: "Point", coordinates: [d.lon!, d.lat!] },
-          properties: { district: d.district, incidents: d.incidents, risk: d.risk_score, sei: d.socio_economic_index },
+          properties: { district: d.district, cases: d.cases, risk: d.risk_score, cs: d.chargesheet_rate },
         })),
       };
       if (map.getSource("districts")) (map.getSource("districts") as maplibregl.GeoJSONSource).setData(data);
@@ -109,7 +109,7 @@ export default function Hotspots() {
           id: "district-circles", type: "circle", source: "districts",
           layout: { visibility: view === "districts" ? "visible" : "none" },
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["get", "incidents"], 0, 7, maxInc, 34],
+            "circle-radius": ["interpolate", ["linear"], ["get", "cases"], 0, 7, maxInc, 34],
             "circle-color": colorExpr(metric),
             "circle-opacity": 0.82,
             "circle-stroke-width": 1.5,
@@ -157,9 +157,9 @@ export default function Hotspots() {
       .forEach((a) => {
         const el = document.createElement("div");
         el.className = "map-pulse" + (a.severity === "Critical" ? "" : " warning");
-        el.title = `${a.crime_type} ↑ ${a.ratio}× · ${a.district}`;
+        el.title = `${a.sub_head} ↑ ${a.ratio}× · ${a.district}`;
         const popup = new maplibregl.Popup({ offset: 14, closeButton: false }).setHTML(
-          `<div style="font-family:Manrope,sans-serif"><b>${a.crime_type}</b> ↑ ${a.ratio}×<br/>${a.district} · ${a.recent} in 30d</div>`
+          `<div style="font-family:Manrope,sans-serif"><b>${a.sub_head}</b> ↑ ${a.ratio}×<br/>${a.district} · ${a.recent} in 30d</div>`
         );
         const mk = new maplibregl.Marker({ element: el }).setLngLat([a.lon!, a.lat!]).setPopup(popup).addTo(map);
         markersRef.current.push(mk);
@@ -190,16 +190,16 @@ export default function Hotspots() {
       <Panel
         icon={view === "heat" ? Flame : Building2}
         title={view === "heat" ? "Crime density surface" : "District overview"}
-        subtitle={view === "heat" ? "Kernel-density of incidents" : "Sized by volume, shaded by " + (metric === "risk" ? "risk" : "socio-economic index")}
+        subtitle={view === "heat" ? "Kernel-density of case locations (CaseMaster GPS)" : "Sized by volume, shaded by " + (metric === "risk" ? "risk" : "chargesheet rate")}
         bodyClassName="p-0"
         actions={
           <div className="flex items-center gap-2">
             {view === "districts" && (
               <div className="hidden items-center rounded-lg border border-line p-0.5 sm:flex">
-                {(["risk", "sei"] as Metric[]).map((m) => (
+                {(["risk", "cs"] as Metric[]).map((m) => (
                   <button key={m} onClick={() => setMetric(m)}
                     className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${metric === m ? "bg-surface-2 text-white" : "text-muted hover:text-white/80"}`}>
-                    {m === "risk" ? "Risk" : "SEI"}
+                    {m === "risk" ? "Risk" : "CS rate"}
                   </button>
                 ))}
               </div>
@@ -226,12 +226,12 @@ export default function Hotspots() {
           {/* Legend */}
           <div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-xl border border-line bg-surface/90 px-3.5 py-3 shadow-card backdrop-blur-md">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">
-              {view === "heat" ? "Incident density" : metric === "risk" ? "Risk score" : "Socio-economic index"}
+              {view === "heat" ? "Case density" : metric === "risk" ? "Risk score" : "Chargesheet rate"}
             </div>
             <div className="h-2 w-40 rounded-full" style={{ background: legendGradient(view, metric) }} />
             <div className="mt-1 flex justify-between text-[10px] text-muted">
-              <span>{view === "heat" ? "Low" : metric === "risk" ? "Low" : "Disadvantaged"}</span>
-              <span>{view === "heat" ? "High" : metric === "risk" ? "High" : "Affluent"}</span>
+              <span>{view === "heat" ? "Low" : metric === "risk" ? "Low" : "Weak"}</span>
+              <span>{view === "heat" ? "High" : metric === "risk" ? "High" : "Strong"}</span>
             </div>
             <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted">
               <span className="h-2.5 w-2.5 rounded-full bg-danger" /> emerging-trend spike
@@ -245,7 +245,7 @@ export default function Hotspots() {
         <Panel
           icon={Building2}
           title={`${selected} — drill-down`}
-          subtitle={selectedStat ? `${selectedStat.incidents.toLocaleString()} incidents · SEI ${selectedStat.socio_economic_index} · ${selectedStat.urban_rural}` : undefined}
+          subtitle={selectedStat ? `${selectedStat.cases.toLocaleString()} cases · ${selectedStat.heinous_share}% heinous · ${selectedStat.chargesheet_rate}% chargesheeted` : undefined}
           actions={
             <button onClick={() => setSelected(null)} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition-colors hover:text-white">
               <X size={13} /> Clear
@@ -265,7 +265,7 @@ export default function Hotspots() {
                       <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
                       <YAxis type="category" dataKey="station" tick={{ ...CHART.axisTick, fontSize: 10 }} tickLine={false} axisLine={false} width={120} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
-                      <Bar dataKey="incidents" radius={[0, 4, 4, 0]} maxBarSize={18}>
+                      <Bar dataKey="cases" radius={[0, 4, 4, 0]} maxBarSize={18}>
                         {(station.data?.stations ?? []).slice(0, 8).map((_, i) => <Cell key={i} fill={CHART.accent} />)}
                       </Bar>
                     </BarChart>
@@ -331,9 +331,10 @@ export default function Hotspots() {
 
 // circle-color paint expression by metric
 function colorExpr(metric: Metric): any {
-  if (metric === "sei") {
-    return ["interpolate", ["linear"], ["get", "sei"],
-      0.4, "#ef4444", 0.55, "#f59e0b", 0.7, "#38bdf8", 0.85, "#10b981"];
+  if (metric === "cs") {
+    // chargesheet rate (%): low = red (weak investigation outcomes), high = green
+    return ["interpolate", ["linear"], ["get", "cs"],
+      30, "#ef4444", 45, "#f59e0b", 60, "#38bdf8", 75, "#10b981"];
   }
   return ["interpolate", ["linear"], ["get", "risk"],
     0, "#10b981", 0.25, "#38bdf8", 0.45, "#f59e0b", 0.7, "#ef4444"];
@@ -341,6 +342,6 @@ function colorExpr(metric: Metric): any {
 
 function legendGradient(view: View, metric: Metric): string {
   if (view === "heat") return "linear-gradient(90deg, rgba(91,127,255,0.6), rgba(56,189,248,0.8), rgba(245,158,11,0.9), rgba(239,68,68,1))";
-  if (metric === "sei") return "linear-gradient(90deg, #ef4444, #f59e0b, #38bdf8, #10b981)";
+  if (metric === "cs") return "linear-gradient(90deg, #ef4444, #f59e0b, #38bdf8, #10b981)";
   return "linear-gradient(90deg, #10b981, #38bdf8, #f59e0b, #ef4444)";
 }

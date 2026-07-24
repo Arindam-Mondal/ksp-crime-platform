@@ -181,17 +181,25 @@ All model access already routes through one gate: `backend/app/services/llm.py::
 
 Move off the bundled CSVs to the real architecture (API reads precomputed aggregates).
 
-**6a. Create tables** (console → **Data Store**): the 4 core tables
-(`incidents, persons, incident_persons, locations`) + the aggregates
+**6a. Create tables** (console → **Data Store**): the 26 ERD tables (see `ERD_SCHEMA.md` —
+table & column names must match exactly) + the aggregates
 (`hotspot_cells, district_stats, trend_baselines, alerts, risk_scores, anomalies, graph_edges`).
-Match columns to `project_tech_stack.md §5` / the CSV headers.
 
-**6b. Seed the core tables** — use the built-in CLI bulk import (one per table):
+**6b. Seed the core tables** — use the built-in CLI bulk import, masters first (FK targets),
+then case data. One `ds:import` per CSV in `data/output/` (file name = table name), e.g.:
 ```powershell
-catalyst ds:import data/output/locations.csv --table locations
-catalyst ds:import data/output/persons.csv --table persons
-catalyst ds:import data/output/incidents.csv --table incidents
-catalyst ds:import data/output/incident_persons.csv --table incident_persons
+# masters
+foreach ($t in "State","District","UnitType","Unit","Rank","Designation","Employee",
+               "Court","CaseCategory","GravityOffence","CaseStatusMaster","CasteMaster",
+               "ReligionMaster","OccupationMaster","CrimeHead","CrimeSubHead",
+               "Act","Section","CrimeHeadActSection") {
+  catalyst ds:import "data/output/$t.csv" --table $t
+}
+# case data
+foreach ($t in "CaseMaster","ComplainantDetails","Victim","Accused",
+               "ActSectionAssociation","ArrestSurrender","ChargesheetDetails") {
+  catalyst ds:import "data/output/$t.csv" --table $t
+}
 ```
 (`backend/scripts/seed_datastore.py` is an SDK-based alternative if you prefer code.)
 

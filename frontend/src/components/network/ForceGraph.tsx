@@ -14,7 +14,7 @@ function lerp(a: number[], b: number[], t: number) {
   return a.map((v, i) => Math.round(v + (b[i] - v) * t));
 }
 function radiusOf(n: any, scale = 1) {
-  return (n.is_root ? 13 : 6 + Math.min(8, Math.sqrt(n.incidents || 1) * 1.4)) * scale;
+  return (n.is_root ? 13 : 6 + Math.min(8, Math.sqrt(n.cases || 1) * 1.4)) * scale;
 }
 
 export default function ForceGraph({
@@ -204,7 +204,7 @@ export default function ForceGraph({
         height={height}
         graphData={data}
         backgroundColor="rgba(0,0,0,0)"
-        nodeLabel={(n: any) => `${n.name} · ${n.incidents} FIRs`}
+        nodeLabel={(n: any) => `${n.name} · ${n.cases} FIRs`}
         nodeCanvasObject={drawNode}
         nodePointerAreaPaint={pointerArea}
         linkColor={linkColor}
