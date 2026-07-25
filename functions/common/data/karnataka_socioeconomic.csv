@@ -1,0 +1,32 @@
+district,population,area_km2,urban_pct,literacy_pct,source
+Bengaluru City,9621551,2196,90.9,87.7,Census 2011 (Bengaluru Urban)
+Bengaluru Rural,990923,2259,30.5,77.9,Census 2011
+Mysuru,3001127,6854,41.4,72.8,Census 2011
+Mandya,1805769,4961,16.0,70.1,Census 2011
+Hassan,1776421,6814,17.4,76.1,Census 2011
+Tumakuru,2678980,10598,22.4,75.1,Census 2011
+Kolar,1536401,4012,32.1,74.4,Census 2011
+Chikkaballapur,1255104,4244,19.4,69.8,Census 2011
+Ramanagara,1082636,3556,24.1,69.2,Census 2011
+Chamarajanagar,1020791,5101,17.1,61.4,Census 2011
+Chitradurga,1659456,8388,20.4,73.7,Census 2011
+Davanagere,1945497,5924,32.8,75.7,Census 2011
+Shivamogga,1752753,8477,35.3,80.5,Census 2011
+Chikkamagaluru,1137961,7201,21.9,79.3,Census 2011
+Udupi,1177361,3880,28.0,86.2,Census 2011
+Dakshina Kannada,2089649,4560,47.7,88.6,Census 2011
+Uttara Kannada,1437169,10291,31.4,84.1,Census 2011
+Belagavi,4779661,13415,25.1,73.5,Census 2011
+Bagalkot,1889752,6575,28.4,68.8,Census 2011
+Vijayapura,2177331,10494,23.3,67.2,Census 2011
+Kalaburagi,2566326,10951,33.0,64.9,Census 2011
+Bidar,1703300,5448,23.9,70.5,Census 2011
+Raichur,1928812,6839,22.4,59.6,Census 2011
+Koppal,1389920,7189,16.9,67.3,Census 2011
+Ballari,1100000,2803,38.0,67.4,"Census 2011, split from combined Ballari after 2021 Vijayanagara bifurcation"
+Vijayanagara,1353000,5644,30.0,65.0,"Estimate apportioned from combined Ballari Census 2011 (district formed 2021)"
+Yadgir,1174271,5234,16.9,51.8,Census 2011
+Gadag,1064570,4656,35.7,75.1,Census 2011
+Haveri,1597668,4823,23.5,77.6,Census 2011
+Dharwad,1847023,4260,56.8,80.0,Census 2011
+Kodagu,554519,4102,14.3,82.6,Census 2011

@@ -43,6 +43,22 @@ def district_centroids(cases: list[dict]) -> dict[str, tuple[float, float]]:
             for d, pts in acc.items() if pts}
 
 
+def pearson_r(xs: list[float], ys: list[float]) -> float | None:
+    """Pearson correlation coefficient. None if <3 paired points or zero variance."""
+    pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
+    n = len(pairs)
+    if n < 3:
+        return None
+    mx = sum(p[0] for p in pairs) / n
+    my = sum(p[1] for p in pairs) / n
+    sxx = sum((p[0] - mx) ** 2 for p in pairs)
+    syy = sum((p[1] - my) ** 2 for p in pairs)
+    if sxx <= 0 or syy <= 0:
+        return None
+    sxy = sum((p[0] - mx) * (p[1] - my) for p in pairs)
+    return round(sxy / (sxx ** 0.5 * syy ** 0.5), 3)
+
+
 # --------------------------------------------------- A: spike / trend alerts ----
 def spike_alerts(cases: list[dict], min_recent: int = 8,
                  ratio_threshold: float = 2.0) -> list[dict]:
@@ -155,8 +171,16 @@ def anomalies(cases: list[dict], top_n: int = 12) -> list[dict]:
 
 
 # ------------------------------------------ D: district stats + drill-down ----
-def district_stats(cases: list[dict]) -> list[dict]:
-    """Per-district rollup: volume, heinous share, chargesheet rate, pendency, risk."""
+def district_stats(cases: list[dict], socio: dict[str, dict] | None = None) -> list[dict]:
+    """Per-district rollup: volume, per-capita rate, heinous share, chargesheet rate,
+    pendency, risk.
+
+    When `socio` (district -> {population, ...}) is supplied, each district also gets a
+    per-100k crime rate and the risk score folds in a per-capita term, so a genuinely
+    high-crime district is no longer confused with a merely populous one. Districts with
+    no population row fall back to using their volume rank as the per-capita proxy, so
+    the score stays coherent across the whole table (see reference.socioeconomic())."""
+    socio = socio or {}
     ref = _ref_now(cases)
     recent_cut = ref - timedelta(days=90)
     by_d: dict[str, list[dict]] = defaultdict(list)
@@ -166,9 +190,18 @@ def district_stats(cases: list[dict]) -> list[dict]:
     max_count = max((len(v) for v in by_d.values()), default=1)
     centroids = district_centroids(cases)
 
-    items = []
+    # First pass: per-district facts + per-100k rate (where population is known).
+    facts: dict[str, dict] = {}
     for district, rows in by_d.items():
         n = len(rows)
+        pop = socio.get(district, {}).get("population")
+        per_100k = round(n / pop * 100_000, 1) if pop else None
+        facts[district] = {"rows": rows, "n": n, "per_100k": per_100k}
+    max_per_100k = max((f["per_100k"] for f in facts.values() if f["per_100k"]), default=0) or 1
+
+    items = []
+    for district, f in facts.items():
+        rows, n = f["rows"], f["n"]
         heinous = sum(1 for c in rows if c.get("heinous"))
         finals = [c for c in rows if c.get("cstype")]
         charged = sum(1 for c in finals if c["cstype"] == "A")
@@ -178,13 +211,17 @@ def district_stats(cases: list[dict]) -> list[dict]:
         heinous_share = heinous / n if n else 0
         cs_rate = charged / len(finals) if finals else 0
         pendency = open_n / n if n else 0
-        # risk: volume + heinous concentration + investigative pendency + recent momentum
-        risk = round(0.40 * (n / max_count) + 0.25 * heinous_share
-                     + 0.20 * pendency + 0.15 * min(1.0, recent / max(1, n * 0.2)), 3)
+        volume_norm = n / max_count
+        # per-capita term: real rate where population is known, else fall back to volume.
+        per_capita_norm = f["per_100k"] / max_per_100k if f["per_100k"] else volume_norm
+        # risk: volume + per-capita rate + heinous concentration + pendency + recent momentum
+        risk = round(0.30 * volume_norm + 0.20 * per_capita_norm + 0.20 * heinous_share
+                     + 0.15 * pendency + 0.15 * min(1.0, recent / max(1, n * 0.2)), 3)
         lat, lon = centroids.get(district, (None, None))
         items.append({
             "district": district,
             "cases": n,
+            "per_100k": f["per_100k"],
             "heinous_share": round(heinous_share * 100, 1),
             "chargesheet_rate": round(cs_rate * 100, 1),
             "pendency_rate": round(pendency * 100, 1),
@@ -195,6 +232,42 @@ def district_stats(cases: list[dict]) -> list[dict]:
         })
     items.sort(key=lambda x: x["cases"], reverse=True)
     return items
+
+
+def socioeconomic_correlation(cases: list[dict], socio: dict[str, dict]) -> dict:
+    """Correlate district crime rate against urbanisation, literacy and population
+    density — the 'why behind the where'. Only districts with a socio-economic row are
+    included; returns per-district rows plus Pearson r for each indicator."""
+    counts: Counter = Counter(c["district"] for c in cases if c.get("district"))
+    items = []
+    for district, s in socio.items():
+        n = counts.get(district, 0)
+        pop = s.get("population")
+        if not pop:
+            continue
+        items.append({
+            "district": district,
+            "cases": n,
+            "per_100k": round(n / pop * 100_000, 1),
+            "population": pop,
+            "urban_pct": s.get("urban_pct"),
+            "literacy_pct": s.get("literacy_pct"),
+            "pop_density": s.get("pop_density"),
+        })
+    items.sort(key=lambda x: x["per_100k"], reverse=True)
+
+    rates = [i["per_100k"] for i in items]
+    correlations = {
+        "urbanization": pearson_r([i["urban_pct"] for i in items], rates),
+        "literacy": pearson_r([i["literacy_pct"] for i in items], rates),
+        "density": pearson_r([i["pop_density"] for i in items], rates),
+    }
+    return {
+        "items": items,
+        "correlations": correlations,
+        "method": "crime rate = cases / population × 100,000 (Census 2011 population); "
+                   "Pearson r vs urbanisation %, literacy %, and population density.",
+    }
 
 
 def station_breakdown(cases: list[dict], district: str) -> dict:

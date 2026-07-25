@@ -9,16 +9,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.services import aggregations, firdata
+from app.services import aggregations, firdata, reference
 
 router = APIRouter(prefix="/api/predictive", tags=["predictive"])
 
 
 @router.get("/risk-scores")
 def risk_scores():
-    items = aggregations.district_stats(firdata.cases())
+    items = aggregations.district_stats(firdata.cases(), reference.socioeconomic())
     items = sorted(items, key=lambda x: x["risk_score"], reverse=True)
-    return {"method": "heuristic: volume + heinous share + pendency + 90-day momentum "
+    return {"method": "heuristic: 30% volume + 20% per-capita rate (Census 2011) + 20% "
+                      "heinous share + 15% pendency + 15% 90-day momentum "
                       "(Phase 3 replaces with Zia AutoML)", "items": items}
 
 

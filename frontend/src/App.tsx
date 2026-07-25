@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Hotspots from "./pages/Hotspots";
 import Demographics from "./pages/Demographics";
+import Sociological from "./pages/Sociological";
 import Network from "./pages/Network";
 import PersonProfile from "./pages/PersonProfile";
 import Operations from "./pages/Operations";
@@ -17,6 +18,7 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="hotspots" element={<Hotspots />} />
         <Route path="demographics" element={<Demographics />} />
+        <Route path="sociological" element={<Sociological />} />
         <Route path="network" element={<Network />} />
         <Route path="person/:id" element={<PersonProfile />} />
         <Route path="operations" element={<Operations />} />

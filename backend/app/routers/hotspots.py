@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 
 from fastapi import APIRouter
 
-from app.services import aggregations, firdata
+from app.services import aggregations, firdata, reference
 
 router = APIRouter(prefix="/api/hotspots", tags=["hotspots"])
 
@@ -40,9 +40,9 @@ def cells(precision: int = 2, sub_head: str | None = None):
 
 @router.get("/districts")
 def districts():
-    """Per-district choropleth metrics (volume, heinous share, chargesheet rate,
-    pendency, risk, centroid)."""
-    return {"items": aggregations.district_stats(firdata.cases())}
+    """Per-district choropleth metrics (volume, per-capita rate, heinous share,
+    chargesheet rate, pendency, risk, centroid)."""
+    return {"items": aggregations.district_stats(firdata.cases(), reference.socioeconomic())}
 
 
 @router.get("/stations")

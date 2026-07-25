@@ -21,7 +21,7 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
 };
 
 type View = "heat" | "districts";
-type Metric = "risk" | "cs";
+type Metric = "risk" | "rate" | "cs";
 
 export default function Hotspots() {
   const mapEl = useRef<HTMLDivElement>(null);
@@ -99,7 +99,7 @@ export default function Hotspots() {
         features: items.map((d) => ({
           type: "Feature",
           geometry: { type: "Point", coordinates: [d.lon!, d.lat!] },
-          properties: { district: d.district, cases: d.cases, risk: d.risk_score, cs: d.chargesheet_rate },
+          properties: { district: d.district, cases: d.cases, risk: d.risk_score, cs: d.chargesheet_rate, rate: d.per_100k ?? 0 },
         })),
       };
       if (map.getSource("districts")) (map.getSource("districts") as maplibregl.GeoJSONSource).setData(data);
@@ -190,16 +190,16 @@ export default function Hotspots() {
       <Panel
         icon={view === "heat" ? Flame : Building2}
         title={view === "heat" ? "Crime density surface" : "District overview"}
-        subtitle={view === "heat" ? "Kernel-density of case locations (CaseMaster GPS)" : "Sized by volume, shaded by " + (metric === "risk" ? "risk" : "chargesheet rate")}
+        subtitle={view === "heat" ? "Kernel-density of case locations (CaseMaster GPS)" : "Sized by volume, shaded by " + (metric === "risk" ? "risk" : metric === "rate" ? "crime rate per 100k" : "chargesheet rate")}
         bodyClassName="p-0"
         actions={
           <div className="flex items-center gap-2">
             {view === "districts" && (
               <div className="hidden items-center rounded-lg border border-line p-0.5 sm:flex">
-                {(["risk", "cs"] as Metric[]).map((m) => (
+                {(["risk", "rate", "cs"] as Metric[]).map((m) => (
                   <button key={m} onClick={() => setMetric(m)}
                     className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${metric === m ? "bg-surface-2 text-white" : "text-muted hover:text-white/80"}`}>
-                    {m === "risk" ? "Risk" : "CS rate"}
+                    {m === "risk" ? "Risk" : m === "rate" ? "Per-capita" : "CS rate"}
                   </button>
                 ))}
               </div>
@@ -226,12 +226,12 @@ export default function Hotspots() {
           {/* Legend */}
           <div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-xl border border-line bg-surface/90 px-3.5 py-3 shadow-card backdrop-blur-md">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">
-              {view === "heat" ? "Case density" : metric === "risk" ? "Risk score" : "Chargesheet rate"}
+              {view === "heat" ? "Case density" : metric === "risk" ? "Risk score" : metric === "rate" ? "Crime rate /100k" : "Chargesheet rate"}
             </div>
             <div className="h-2 w-40 rounded-full" style={{ background: legendGradient(view, metric) }} />
             <div className="mt-1 flex justify-between text-[10px] text-muted">
-              <span>{view === "heat" ? "Low" : metric === "risk" ? "Low" : "Weak"}</span>
-              <span>{view === "heat" ? "High" : metric === "risk" ? "High" : "Strong"}</span>
+              <span>{view === "heat" ? "Low" : metric === "cs" ? "Weak" : "Low"}</span>
+              <span>{view === "heat" ? "High" : metric === "cs" ? "Strong" : "High"}</span>
             </div>
             <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted">
               <span className="h-2.5 w-2.5 rounded-full bg-danger" /> emerging-trend spike
@@ -335,6 +335,11 @@ function colorExpr(metric: Metric): any {
     // chargesheet rate (%): low = red (weak investigation outcomes), high = green
     return ["interpolate", ["linear"], ["get", "cs"],
       30, "#ef4444", 45, "#f59e0b", 60, "#38bdf8", 75, "#10b981"];
+  }
+  if (metric === "rate") {
+    // crime rate per 100k residents: low = green, high = red
+    return ["interpolate", ["linear"], ["get", "rate"],
+      10, "#10b981", 25, "#38bdf8", 40, "#f59e0b", 60, "#ef4444"];
   }
   return ["interpolate", ["linear"], ["get", "risk"],
     0, "#10b981", 0.25, "#38bdf8", 0.45, "#f59e0b", 0.7, "#ef4444"];

@@ -18,6 +18,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))  # for `common`
 from common import aggregations as agg          # noqa: E402
 from common import catalyst_io as io            # noqa: E402
 from common import firview                      # noqa: E402
+from common import reference                    # noqa: E402
 
 
 def handler(event, context):  # Catalyst Cron entry point
@@ -25,7 +26,8 @@ def handler(event, context):  # Catalyst Cron entry point
 
     written = {
         "hotspot_cells": io.replace_table("hotspot_cells", agg.hotspot_cells(cases)),
-        "district_stats": io.replace_table("district_stats", agg.district_stats(cases)),
+        "district_stats": io.replace_table("district_stats",
+                                           agg.district_stats(cases, reference.socioeconomic())),
         "trend_baselines": io.replace_table("trend_baselines", agg.trend_baselines(cases)),
         "alerts": io.replace_table("alerts", agg.spike_alerts(cases)),
     }

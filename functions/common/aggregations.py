@@ -40,6 +40,22 @@ def district_centroids(cases):
             for d, pts in acc.items() if pts}
 
 
+def pearson_r(xs, ys):
+    """Pearson correlation coefficient. None if <3 paired points or zero variance."""
+    pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
+    n = len(pairs)
+    if n < 3:
+        return None
+    mx = sum(p[0] for p in pairs) / n
+    my = sum(p[1] for p in pairs) / n
+    sxx = sum((p[0] - mx) ** 2 for p in pairs)
+    syy = sum((p[1] - my) ** 2 for p in pairs)
+    if sxx <= 0 or syy <= 0:
+        return None
+    sxy = sum((p[0] - mx) * (p[1] - my) for p in pairs)
+    return round(sxy / (sxx ** 0.5 * syy ** 0.5), 3)
+
+
 # ---------------------------------------------------------- hotspot_cells ----
 def hotspot_cells(cases, precision: int = 2, top: int = 500):
     grid = defaultdict(int)
@@ -53,8 +69,13 @@ def hotspot_cells(cases, precision: int = 2, top: int = 500):
 
 
 # ----------------------------------------------------------- district_stats ----
-def district_stats(cases):
-    """Per-district rollup: volume, heinous share, chargesheet rate, pendency, risk."""
+def district_stats(cases, socio=None):
+    """Per-district rollup: volume, per-capita rate, heinous share, chargesheet rate,
+    pendency, risk. When `socio` (district -> {population, ...}) is supplied, each row
+    also gets a per-100k crime rate and the risk score folds in a per-capita term.
+    Districts without a population row fall back to volume as the per-capita proxy.
+    Keep in sync with backend/app/services/aggregations.py."""
+    socio = socio or {}
     ref = _ref_now(cases)
     recent_cut = ref - timedelta(days=90)
     by_d = defaultdict(list)
@@ -64,9 +85,17 @@ def district_stats(cases):
     max_count = max((len(v) for v in by_d.values()), default=1)
     centroids = district_centroids(cases)
 
-    items = []
+    facts = {}
     for district, rows in by_d.items():
         n = len(rows)
+        pop = socio.get(district, {}).get("population")
+        facts[district] = {"rows": rows, "n": n,
+                           "per_100k": round(n / pop * 100_000, 1) if pop else None}
+    max_per_100k = max((f["per_100k"] for f in facts.values() if f["per_100k"]), default=0) or 1
+
+    items = []
+    for district, f in facts.items():
+        rows, n = f["rows"], f["n"]
         heinous = sum(1 for c in rows if c.get("heinous"))
         finals = [c for c in rows if c.get("cstype")]
         charged = sum(1 for c in finals if c["cstype"] == "A")
@@ -75,10 +104,12 @@ def district_stats(cases):
         heinous_share = heinous / n if n else 0
         cs_rate = charged / len(finals) if finals else 0
         pendency = open_n / n if n else 0
-        risk = round(0.40 * (n / max_count) + 0.25 * heinous_share
-                     + 0.20 * pendency + 0.15 * min(1.0, recent / max(1, n * 0.2)), 3)
+        volume_norm = n / max_count
+        per_capita_norm = f["per_100k"] / max_per_100k if f["per_100k"] else volume_norm
+        risk = round(0.30 * volume_norm + 0.20 * per_capita_norm + 0.20 * heinous_share
+                     + 0.15 * pendency + 0.15 * min(1.0, recent / max(1, n * 0.2)), 3)
         lat, lon = centroids.get(district, (None, None))
-        items.append({"district": district, "cases": n,
+        items.append({"district": district, "cases": n, "per_100k": f["per_100k"],
                       "heinous_share": round(heinous_share * 100, 1),
                       "chargesheet_rate": round(cs_rate * 100, 1),
                       "pendency_rate": round(pendency * 100, 1),
@@ -87,9 +118,9 @@ def district_stats(cases):
     return items
 
 
-def risk_scores(cases):
+def risk_scores(cases, socio=None):
     """risk_scores table (Zia AutoML stand-in: transparent heuristic)."""
-    return district_stats(cases)
+    return district_stats(cases, socio)
 
 
 # ------------------------------------------------ trend_baselines + alerts ----

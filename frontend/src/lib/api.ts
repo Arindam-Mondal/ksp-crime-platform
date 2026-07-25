@@ -97,8 +97,8 @@ export interface InvestigationTiming {
 export interface DistrictCount { district: string; cases: number }
 export interface HotspotCell { lat: number; lon: number; count: number }
 export interface DistrictStat {
-  district: string; cases: number; heinous_share: number; chargesheet_rate: number;
-  pendency_rate: number; recent_90d: number; risk_score: number;
+  district: string; cases: number; per_100k: number | null; heinous_share: number;
+  chargesheet_rate: number; pendency_rate: number; recent_90d: number; risk_score: number;
   lat: number | null; lon: number | null;
 }
 export interface StationBreakdown {
@@ -107,6 +107,36 @@ export interface StationBreakdown {
   by_type: NameCount[];
   by_hour: HourCount[];
 }
+
+// --- socio-economic correlation ---
+export interface SocioItem {
+  district: string; cases: number; per_100k: number; population: number;
+  urban_pct: number; literacy_pct: number; pop_density: number;
+  rate_rank: number; volume_rank: number; rank_shift: number;
+}
+export interface SocioCorrelations {
+  urbanization: number | null; literacy: number | null; density: number | null;
+}
+export interface Socioeconomic {
+  items: SocioItem[]; correlations: SocioCorrelations; method: string;
+}
+
+// --- modus operandi ---
+export interface MoSignature {
+  n_cases: number;
+  top_crimes: { name: string; share: number }[];
+  time_profile: { bucket: string; count: number }[];
+  dominant_time: string | null;
+  top_sections: string[];
+  heinous_share: number;
+  jurisdictions: string[];
+}
+export interface MoMatch {
+  person_id: string; name: string; gender: string; cases: number; similarity: number;
+  shared_crimes: string[]; shared_sections: number; districts: string[];
+  different_jurisdiction: boolean; is_associate: boolean;
+}
+export interface MoProfile { signature: MoSignature; matches: MoMatch[] }
 
 // --- network / person ---
 export interface OffenderCount {
@@ -198,6 +228,7 @@ export const api = {
   courts: () => get<{ total_courts: number; items: CourtRow[] }>("/api/analytics/courts"),
   demographics: () => get<Demographics>("/api/analytics/demographics"),
   investigation: () => get<InvestigationTiming>("/api/analytics/investigation"),
+  socioeconomic: () => get<Socioeconomic>("/api/analytics/socioeconomic"),
 
   // Hotspots
   byDistrict: () => get<{ items: DistrictCount[] }>("/api/hotspots/by-district"),
@@ -212,6 +243,7 @@ export const api = {
   topOffenders: () => get<{ items: OffenderCount[] }>("/api/network/top-offenders"),
   ego: (personId: string) => get<EgoGraph>(`/api/network/ego/${personId}`),
   person: (personId: string) => get<PersonProfile>(`/api/network/person/${personId}`),
+  mo: (personId: string) => get<MoProfile>(`/api/network/mo/${personId}`),
   relationship: (a: string, b: string) => get<Relationship>(`/api/network/relationship/${a}/${b}`),
 
   // Predictive / alerts

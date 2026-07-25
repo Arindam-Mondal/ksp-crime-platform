@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 
-from app.services import firdata
+from app.services import firdata, mo
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -181,6 +181,15 @@ def person_profile(person_id: str):
         "top_sections": [{"name": k, "count": v} for k, v in sections.most_common(8)],
         "associates": associates,
     }
+
+
+@router.get("/mo/{person_id}")
+def modus_operandi(person_id: str, limit: int = 8):
+    """Behavioural MO signature for an offender + ranked 'same MO' matches — the recurring
+    method surfacing across jurisdictions (see services/mo.py)."""
+    if person_id not in firdata.offenders()["by_id"]:
+        raise HTTPException(status_code=404, detail="person not found")
+    return mo.profile(person_id, limit=limit)
 
 
 @router.get("/relationship/{a}/{b}")

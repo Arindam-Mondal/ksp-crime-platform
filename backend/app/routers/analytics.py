@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 
 from fastapi import APIRouter
 
-from app.services import firdata
+from app.services import aggregations, firdata, reference
 from app.services.datastore import get_store
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -390,3 +390,22 @@ def investigation_timing():
                for h, v in cs_by_head.items()]
     cs_time.sort(key=lambda x: -x["median_days"])
     return {"report_delay": report_delay[:12], "days_to_chargesheet": cs_time}
+
+
+@router.get("/socioeconomic")
+def socioeconomic():
+    """The 'why behind the where': per-district crime rate per 100k population,
+    correlated against urbanisation, literacy and population density (Census 2011).
+
+    Volume-ranked hotspots can mislead — a populous district looks dangerous simply for
+    being big. This normalises crime by population and surfaces which socio-economic
+    factors actually track higher crime rates."""
+    data = aggregations.socioeconomic_correlation(firdata.cases(), reference.socioeconomic())
+    # Contrast: how districts reorder when ranked by rate vs raw volume (the key insight).
+    by_volume = sorted(data["items"], key=lambda x: -x["cases"])
+    vol_rank = {d["district"]: i + 1 for i, d in enumerate(by_volume)}
+    for i, it in enumerate(data["items"]):  # data["items"] is already rate-sorted
+        it["rate_rank"] = i + 1
+        it["volume_rank"] = vol_rank[it["district"]]
+        it["rank_shift"] = it["volume_rank"] - it["rate_rank"]
+    return data

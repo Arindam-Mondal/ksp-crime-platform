@@ -17,12 +17,14 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from common import aggregations as agg          # noqa: E402
 from common import catalyst_io as io            # noqa: E402
 from common import firview                      # noqa: E402
+from common import reference                    # noqa: E402
 
 
 def handler(event, context):
     cases = firview.build_case_view(io.read_all)
+    socio = reference.socioeconomic()
     written = {
-        "risk_scores": io.replace_table("risk_scores", agg.risk_scores(cases)),
+        "risk_scores": io.replace_table("risk_scores", agg.risk_scores(cases, socio)),
         "anomalies": io.replace_table("anomalies", agg.anomalies(cases, top_n=50)),
     }
     print(f"[risk_job] wrote {written}")

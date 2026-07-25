@@ -8,8 +8,9 @@ import {
 import {
   ArrowLeft, ShieldAlert, Layers, Users, MapPin, Clock,
   ListChecks, GitBranch, ChevronDown, Fingerprint, Activity, FileText, Lock,
+  Radar, MoveRight,
 } from "lucide-react";
-import { api, Associate, CrimeRow } from "../lib/api";
+import { api, Associate, CrimeRow, MoMatch } from "../lib/api";
 import Panel from "../components/Panel";
 import StatCard from "../components/StatCard";
 import Badge from "../components/Badge";
@@ -143,6 +144,7 @@ export default function PersonProfile() {
   const navigate = useNavigate();
   const profile = useQuery({ queryKey: ["person", id], queryFn: () => api.person(id), enabled: !!id });
   const ego = useQuery({ queryKey: ["ego", id], queryFn: () => api.ego(id), enabled: !!id });
+  const moq = useQuery({ queryKey: ["mo", id], queryFn: () => api.mo(id), enabled: !!id });
 
   const [showAll, setShowAll] = useState(false);
 
@@ -249,6 +251,94 @@ export default function PersonProfile() {
         </Panel>
       </div>
 
+      {/* Modus operandi */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <Panel
+          icon={Fingerprint}
+          title="Modus operandi signature"
+          subtitle="Behavioural fingerprint derived from all linked FIRs"
+          actions={
+            moq.data?.signature.dominant_time ? (
+              <Badge variant="info"><Clock size={11} /> mostly {moq.data.signature.dominant_time.toLowerCase()}</Badge>
+            ) : undefined
+          }
+        >
+          {moq.isPending ? (
+            <Skeleton className="h-56 w-full" />
+          ) : moq.data ? (
+            <div className="space-y-4">
+              {/* top crimes with share bars */}
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Signature crimes</div>
+                <div className="space-y-1.5">
+                  {moq.data.signature.top_crimes.map((c) => (
+                    <div key={c.name} className="flex items-center gap-3">
+                      <span className="w-40 shrink-0 truncate text-xs text-white/85">{c.name}</span>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/80">
+                        <div className="h-full rounded-full bg-gradient-to-r from-accent/50 to-accent" style={{ width: `${c.share}%` }} />
+                      </div>
+                      <span className="tabular w-10 shrink-0 text-right text-[11px] text-muted">{c.share}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* time-of-day profile */}
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">When they strike</div>
+                <div className="grid grid-cols-4 gap-2">
+                  {moq.data.signature.time_profile.map((t) => {
+                    const max = Math.max(1, ...moq.data!.signature.time_profile.map((x) => x.count));
+                    const on = t.bucket === moq.data!.signature.dominant_time;
+                    return (
+                      <div key={t.bucket} className="rounded-lg border border-line bg-bg/30 px-2 py-2 text-center">
+                        <div className="mx-auto flex h-12 items-end justify-center">
+                          <div className={`w-4 rounded-t ${on ? "bg-accent" : "bg-surface-2"}`} style={{ height: `${Math.max(8, (t.count / max) * 100)}%` }} />
+                        </div>
+                        <div className={`mt-1 text-[10px] ${on ? "text-white/85" : "text-muted"}`}>{t.bucket}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* sections + jurisdiction spread */}
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-3">
+                <div>
+                  <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Legal fingerprint</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {moq.data.signature.top_sections.length ? moq.data.signature.top_sections.map((s) => (
+                      <span key={s} className="rounded-full border border-line bg-surface-2/60 px-2.5 py-1 text-[11px] text-white/80">{s}</span>
+                    )) : <span className="text-xs text-muted">No sections recorded.</span>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  <MapPin size={13} /> operates across
+                  <span className="tabular font-semibold text-white/85">{moq.data.signature.jurisdictions.length}</span>
+                  district{moq.data.signature.jurisdictions.length === 1 ? "" : "s"}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <EmptyState icon={Fingerprint} title="No MO signature" hint="Not enough linked cases to profile this person's method." />
+          )}
+        </Panel>
+
+        <Panel
+          icon={Radar}
+          title="Same MO across jurisdictions"
+          subtitle="Offenders whose method most closely matches — the recurring MO the challenge asks us to surface"
+        >
+          {moq.isPending ? (
+            <TableSkeleton rows={5} />
+          ) : moq.data && moq.data.matches.length ? (
+            <ul className="max-h-[440px] space-y-2 overflow-auto pr-1">
+              {moq.data.matches.map((m) => <MoMatchRow key={m.person_id} m={m} />)}
+            </ul>
+          ) : (
+            <EmptyState icon={Radar} title="No behavioural matches" hint="No other repeat offender shares a comparable modus operandi." />
+          )}
+        </Panel>
+      </div>
+
       {/* Arrest history */}
       <Panel icon={Lock} title="Arrest & surrender history" subtitle="From the ArrestSurrender table">
         {profile.isPending ? (
@@ -347,6 +437,37 @@ export default function PersonProfile() {
         </Panel>
       </div>
     </div>
+  );
+}
+
+function MoMatchRow({ m }: { m: MoMatch }) {
+  const pct = Math.round(m.similarity * 100);
+  return (
+    <li className="rounded-lg border border-line/70 bg-bg/30 px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <Avatar id={m.person_id} gender={m.gender} name={m.name} size={34} />
+        <Link to={`/person/${m.person_id}`} className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-white/90 hover:text-accent-soft">{m.name}</span>
+          <span className="tabular block text-[11px] text-muted">{m.person_id} · {m.cases} FIRs</span>
+        </Link>
+        <div className="flex items-center gap-2">
+          {m.different_jurisdiction && (
+            <Badge variant="warning"><MoveRight size={11} /> cross-district</Badge>
+          )}
+          {m.is_associate && <Badge variant="neutral">known associate</Badge>}
+          <Badge variant="accent">{pct}% match</Badge>
+        </div>
+      </div>
+      <div className="mt-2 flex items-center gap-3">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/80">
+          <div className="h-full rounded-full bg-gradient-to-r from-accent/50 to-accent" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="truncate text-[11px] text-muted" title={m.shared_crimes.join(", ")}>
+          shares {m.shared_crimes.slice(0, 2).join(", ") || "timing & sections"}
+          {m.shared_sections ? ` · ${m.shared_sections} sections` : ""}
+        </span>
+      </div>
+    </li>
   );
 }
 

@@ -82,6 +82,9 @@ export default function Predictive() {
                   <th className="py-2.5 pr-4 font-semibold">
                     <SortBtn k="cases">Cases</SortBtn>
                   </th>
+                  <th className="py-2.5 pr-4 font-semibold" title="Cases per 100,000 residents (Census 2011)">
+                    Rate/100k
+                  </th>
                   <th className="py-2.5 pr-4 font-semibold">
                     <SortBtn k="heinous_share">Heinous</SortBtn>
                   </th>
@@ -107,6 +110,7 @@ export default function Predictive() {
                       <td className="tabular py-2.5 pr-4 text-muted">{String(i + 1).padStart(2, "0")}</td>
                       <td className="py-2.5 pr-4 font-medium text-white/90">{r.district}</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.cases.toLocaleString()}</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">{r.per_100k ?? "—"}</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.heinous_share}%</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.pendency_rate}%</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.chargesheet_rate}%</td>
