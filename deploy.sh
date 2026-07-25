@@ -12,7 +12,15 @@
 #   4. Activation  - poll live /health until its build_id matches this build
 #                    (Catalyst activates asynchronously and silently keeps the old build on failure)
 #   5. Frontend    - npm build with the prod API base, refresh client/, deploy web client
-#   6. Verify      - smoke-check the key live endpoints, print the URLs
+#   6. Verify      - smoke-check the key live endpoints (incl. socio-economic + MO), URLs
+#
+# Backend + frontend are rebuilt from source every run, so the latest code always ships:
+# the Dockerfile `COPY app ./app` bundles all backend code + app/data/*.csv (the Census
+# reference), and Vite compiles the current frontend. The AppSail container runs
+# DATA_MODE=local (bundled CSVs), so the FastAPI app computes every aggregate — including
+# the new per-capita + MO analytics — on the fly. The functions/ Cron jobs are NOT deployed
+# here; they are scaffolding for the future catalyst-mode Data Store architecture, dormant
+# while DATA_MODE=local.
 #
 # Usage:
 #   ./deploy.sh                    # full end-to-end deploy
@@ -58,7 +66,8 @@ echo "KSP Crime Platform - Catalyst deploy (build id: $BUILD_ID)"
 
 # ---------------------------------------------------------------- 1. preflight
 step "Preflight checks"
-run docker info --format 'docker engine {{.ServerVersion}}'
+# NOTE: `docker info` exits 0 even when the daemon is down; `docker version` does not.
+run docker version --format 'docker engine {{.Server.Version}}'
 run catalyst whoami
 run node --version
 if [ "$SKIP_FRONTEND" -eq 0 ]; then
@@ -142,10 +151,18 @@ fi
 # ---------------------------------------------------------------- 5. verify
 step "Verify live endpoints"
 for p in /health /api/analytics/summary /api/analytics/case-funnel \
-         /api/alerts/spikes /api/hotspots/districts /api/network/top-offenders; do
+         /api/alerts/spikes /api/hotspots/districts /api/network/top-offenders \
+         /api/analytics/socioeconomic /api/predictive/risk-scores; do
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$API_URL$p" || echo 000)"
   if [ "$code" = "200" ]; then log "OK   $p"; else log "FAIL $p (HTTP $code)"; fi
 done
+# Modus Operandi needs a person id, so fetch a live one and confirm the endpoint answers.
+offid="$(curl -s --max-time 30 "$API_URL/api/network/top-offenders?limit=1" \
+         | sed -n 's/.*"person_id":"\([^"]*\)".*/\1/p' | head -1)"
+if [ -n "$offid" ]; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$API_URL/api/network/mo/$offid" || echo 000)"
+  if [ "$code" = "200" ]; then log "OK   /api/network/mo/$offid"; else log "FAIL /api/network/mo (HTTP $code)"; fi
+fi
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$FRONTEND_URL" || echo 000)"
 if [ "$code" = "200" ]; then log "OK   frontend"; else log "FAIL frontend (HTTP $code)"; fi
 

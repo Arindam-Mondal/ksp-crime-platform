@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(catalyst deploy appsail --name ksp-api --source docker-archive://ksp-api-oci.tar --port 9000)"
+    ]
+  }
+}

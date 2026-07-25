@@ -14,7 +14,16 @@
     4. Activation  - poll the live /health until its build_id matches this build
                      (Catalyst activates asynchronously and silently keeps the old build on failure)
     5. Frontend    - npm build with the prod API base, refresh client/, deploy web client
-    6. Verify      - smoke-check the key live endpoints, print the URLs
+    6. Verify      - smoke-check the key live endpoints (incl. socio-economic + Modus
+                     Operandi), print the URLs
+
+  Backend + frontend are rebuilt from source every run, so the latest code always ships:
+  the Dockerfile `COPY app ./app` bundles all backend code + app/data/*.csv (the Census
+  reference), and Vite compiles the current frontend. The AppSail container runs
+  DATA_MODE=local (bundled CSVs), so the FastAPI app computes every aggregate — including
+  the new per-capita + MO analytics — on the fly. The functions/ Cron jobs are NOT
+  deployed here; they are scaffolding for the future catalyst-mode Data Store architecture
+  and are dormant while DATA_MODE=local.
 
 .EXAMPLE
   .\deploy.ps1                    # full end-to-end deploy
@@ -57,7 +66,8 @@ Write-Host "KSP Crime Platform - Catalyst deploy (build id: $BuildId)" -Foregrou
 
 # ---------------------------------------------------------------- 1. preflight
 Step "Preflight checks"
-Run 'docker info --format "docker engine {{.ServerVersion}}"'
+# NOTE: `docker info` exits 0 even when the daemon is down; `docker version` does not.
+Run 'docker version --format "docker engine {{.Server.Version}}"'
 Run 'catalyst whoami'
 Run 'node --version'
 if (-not $SkipFrontend) {
@@ -143,7 +153,8 @@ if (-not $SkipFrontend) {
 # ---------------------------------------------------------------- 5. verify
 Step "Verify live endpoints"
 $checks = @("/health", "/api/analytics/summary", "/api/analytics/case-funnel",
-            "/api/alerts/spikes", "/api/hotspots/districts", "/api/network/top-offenders")
+            "/api/alerts/spikes", "/api/hotspots/districts", "/api/network/top-offenders",
+            "/api/analytics/socioeconomic", "/api/predictive/risk-scores")
 foreach ($p in $checks) {
     try {
         $r = Invoke-WebRequest -UseBasicParsing "$ApiUrl$p" -TimeoutSec 30
@@ -151,6 +162,15 @@ foreach ($p in $checks) {
     } catch {
         Log ("FAIL {0}  {1}" -f $p, $_.Exception.Message)
     }
+}
+# Modus Operandi needs a person id, so fetch a live one and confirm the endpoint answers.
+try {
+    $off = Invoke-RestMethod "$ApiUrl/api/network/top-offenders?limit=1" -TimeoutSec 30
+    $offId = $off.items[0].person_id
+    $mo = Invoke-WebRequest -UseBasicParsing "$ApiUrl/api/network/mo/$offId" -TimeoutSec 30
+    Log ("OK  /api/network/mo/{0}  ({1} bytes)" -f $offId, $mo.Content.Length)
+} catch {
+    Log ("FAIL /api/network/mo  {0}" -f $_.Exception.Message)
 }
 try {
     $r = Invoke-WebRequest -UseBasicParsing $FrontendUrl -TimeoutSec 30
