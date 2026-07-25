@@ -47,39 +47,47 @@ catalyst init                         # choose "use existing project" → ksp-cr
 
 ## 3 · Deploy the backend (AppSail · custom Docker runtime)   🧑
 
+> **⚡ One-command path:** at the repo root, **`./deploy.sh`** (macOS / Linux / Git-Bash;
+> flags `--skip-data`, `--skip-backend`, `--skip-frontend`, `--cases N`, `--seed N`) or
+> **`.\deploy.ps1`** (Windows PowerShell; `-SkipData`, `-SkipBackend`, `-SkipFrontend`).
+> Both run this section *and* section 4 end-to-end with step-by-step logging — every
+> external command is printed before it runs, and activation is verified by matching the
+> live `/health` `build_id` against the one baked into the image. The manual steps below
+> are what the scripts execute.
+
 The image is **Python 3.12 + uv + gunicorn**; it **bundles the synthetic CSVs** and defaults to
 `DATA_MODE=local` so the live API has data immediately (phase 1). It listens on
 `$X_ZOHO_CATALYST_LISTEN_PORT` (Catalyst injects this), falling back to 9000.
 
 **3a. Bundle the dataset into the build context** (whenever data changes):
 ```powershell
-py data/generator/generate_synthetic.py --incidents 20000 --seed 42
+py data/generator/generate_synthetic.py --cases 20000 --seed 42
 Copy-Item data/output/*.csv backend/_seed_data/
 ```
 
-**3b. Build the image** (with Docker Desktop running):
+**3b. Build the image as an OCI-layout archive** (with Docker Desktop running):
 ```powershell
-docker build -t ksp-api:latest backend
-# optional local sanity check:
-docker run --rm -p 9000:9000 ksp-api:latest
-#   curl http://localhost:9000/health   → expect {"incidents_loaded":20000}
+docker buildx create --name ocibuilder --driver docker-container   # once per machine
+docker buildx build --builder ocibuilder --platform linux/amd64 `
+  --build-arg BUILD_ID=$(Get-Date -Format yyyyMMdd-HHmmss) `
+  -o type=oci,dest=ksp-api-oci.tar -t ksp-api:latest backend
 ```
+> ⚠️ **Do not use `--source docker://localhost/...`** on an older Docker engine (< Desktop
+> 4.12 / no containerd image store): the CLI runs `docker save`, which emits a legacy
+> docker-layout tar, and Catalyst's bundle creator rejects it server-side with
+> `Parse manifest data: Error("invalid type: map, expected u32")` — while the CLI still
+> reports DEPLOYMENT SUCCESSFUL and the old build silently keeps serving. The OCI archive
+> above is the format Catalyst actually parses.
 
-**3c. Initialize the AppSail service for this image & deploy:**
+**3c. Deploy the archive:**
 ```powershell
-catalyst appsail:add
-#   Prompt 1 (runtime):  Docker Image  (NOT a Catalyst-managed runtime)
-#   Prompt 2 (protocol): Docker Image
-#   Prompt 3 (image):    select  ksp-api:latest  from the local list
-#   Prompt 4 (name):     ksp-api
-#   Port:                9000
-catalyst deploy appsail
+catalyst deploy appsail --name ksp-api --source docker-archive://ksp-api-oci.tar --port 9000
 ```
-> For container images **no `app-config.json` is generated** — the spec is written into
-> `catalyst.json`. (`backend/app-config.json` in the repo is only for the *managed*-runtime
-> alternative; the Docker path ignores it.)
->
-> Equivalent one-liner: `catalyst deploy appsail --name ksp-api --source docker://localhost/ksp-api:latest --port 9000`
+> The `docker-archive://` protocol (not shown in `--help`) uploads the tar verbatim. The CLI
+> reports success on *upload*; bundling + activation happen asynchronously on Catalyst's side.
+> Verify activation via `/health` → its `build_id` must match the `BUILD_ID` you baked in
+> (this is exactly what `deploy.ps1` polls for). If it never flips, check the AppSail build
+> log in the console — and note the AppSail enable/disable toggle is console-only.
 
 **3d. Set the backend env** (console → **AppSail → ksp-api → Configuration → Environment**):
 ```

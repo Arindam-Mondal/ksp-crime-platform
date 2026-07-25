@@ -22,6 +22,8 @@ dist-ssr/
 
 # --- Catalyst CLI artifacts ---
 .catalyst/
+.catalystrc
+ksp-api-oci.tar
 catalyst-cli.log
 **/.catalyst-deploy/
 

@@ -1,5 +1,7 @@
-"""Health + readiness. Used by the Phase 0 deploy smoke test."""
+"""Health + readiness. Used by the deploy smoke test and deploy.ps1's activation check."""
 from __future__ import annotations
+
+import os
 
 from fastapi import APIRouter
 
@@ -23,4 +25,6 @@ def health():
         "data_mode": settings.data_mode,
         "llm_provider": settings.llm_provider,
         "cases_loaded": cases_loaded,
+        # baked in at image build (deploy.ps1 --build-arg); proves which build is live
+        "build_id": os.getenv("BUILD_ID", "dev"),
     }

@@ -31,8 +31,17 @@ class Settings(BaseSettings):
     smartbrowz_api_key: str = ""
     stratus_bucket: str = ""
 
-    # CORS for local dev (Vite default port).
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # CORS: local dev (Vite default port) + the deployed Catalyst Web Client origin.
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://ksp-crime-platform-60072978366.development.catalystserverless.in",
+    ]
+    # On Catalyst, the AppSail gateway injects its own CORS headers; adding ours too produces
+    # DUPLICATE Access-Control-Allow-Origin headers, which browsers reject. So disable the
+    # app-level CORS middleware on Catalyst (set APP_CORS_ENABLED=false) and let the gateway
+    # own CORS. Locally it defaults to True (harmless; dev uses the Vite proxy anyway).
+    app_cors_enabled: bool = True
 
 
 @lru_cache
