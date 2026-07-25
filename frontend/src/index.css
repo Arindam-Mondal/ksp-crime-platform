@@ -47,6 +47,17 @@ body::before {
   color: #fff;
 }
 
+/* Consistent keyboard focus ring across buttons, links and nav (inputs manage their
+   own focus via ring/border utilities). Only shows for keyboard users (:focus-visible). */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #869bff;
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
 /* Thin, themed scrollbars */
 * {
   scrollbar-width: thin;
@@ -146,4 +157,26 @@ body::before {
 }
 .maplibregl-ctrl-attrib a {
   color: #b6c0d8 !important;
+}
+
+/* Accessibility: honour the OS "reduce motion" setting (PRODUCT.md commitment).
+   Entrance/shimmer/pulse animations collapse to their end state; the red-zone spike
+   markers stop pulsing but stay visible (severity is also carried by colour + popup
+   text, never motion alone). Transitions become instant state changes. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .map-pulse::after {
+    animation: none !important;
+    opacity: 0;
+  }
+  .skeleton::after {
+    display: none;
+  }
 }

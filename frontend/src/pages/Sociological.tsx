@@ -13,9 +13,7 @@ import PageHeader from "../components/PageHeader";
 import StatCard from "../components/StatCard";
 import Badge from "../components/Badge";
 import { Skeleton, TableSkeleton } from "../components/Skeleton";
-import {
-  CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle,
-} from "../components/charts/theme";
+import { CHART, tooltipStyle } from "../components/charts/theme";
 
 // Least-squares fit over {x,y} points → endpoints for a trend segment.
 function linreg(pts: { x: number; y: number }[]) {
@@ -295,10 +293,7 @@ function ScatterPanel({
               />
               <ZAxis range={[50, 50]} />
               <Tooltip
-                contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle}
                 cursor={{ strokeDasharray: "3 3", stroke: CHART.grid }}
-                formatter={(v: any, n: any) => [v, n === "y" ? "rate/100k" : xLabel]}
-                labelFormatter={() => ""}
                 content={({ payload }) => {
                   const p = payload?.[0]?.payload as any;
                   if (!p) return null;
