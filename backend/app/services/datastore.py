@@ -95,3 +95,22 @@ def get_store() -> DataStore:
     if settings.data_mode == "catalyst":
         return CatalystStore()
     return LocalCsvStore(settings.data_dir)
+
+
+def read_aggregate_or_compute(table: str, compute):
+    """The actual precompute-and-serve read path: in catalyst mode, SELECT the
+    aggregate table a Cron/Event job already wrote (hotspot_cells, district_stats,
+    risk_scores, anomalies, alerts, graph_edges, communities — see CLAUDE.md); only
+    fall back to computing `compute()` live if that table is empty (e.g. first deploy,
+    before any job has run yet) or we're in local mode where no Cron scheduler exists.
+
+    This is the piece that was previously missing: every router used to call
+    `compute()` unconditionally regardless of DATA_MODE, so the Cron jobs' output was
+    written but never read. Callers pass the exact aggregate table name and a zero-arg
+    callable that reproduces the same rows locally (the existing aggregations.* calls)."""
+    settings = get_settings()
+    if settings.data_mode == "catalyst":
+        rows = get_store().rows(table)
+        if rows:
+            return rows
+    return compute()

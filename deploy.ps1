@@ -163,6 +163,19 @@ foreach ($p in $checks) {
         Log ("FAIL {0}  {1}" -f $p, $_.Exception.Message)
     }
 }
+# These three run real ML on first call (DBSCAN / IsolationForest+KMeans / Louvain) and
+# are @lru_cache'd after that — longer timeout here catches a real regression instead of a
+# false-negative timeout, and doubles as the warm-up so the first real visitor doesn't pay
+# the cold-start cost themselves.
+$mlChecks = @("/api/hotspots/cells", "/api/predictive/anomalies", "/api/network/communities")
+foreach ($p in $mlChecks) {
+    try {
+        $r = Invoke-WebRequest -UseBasicParsing "$ApiUrl$p" -TimeoutSec 60
+        Log ("OK  {0} (warmed)  ({1} bytes)" -f $p, $r.Content.Length)
+    } catch {
+        Log ("FAIL {0}  {1}" -f $p, $_.Exception.Message)
+    }
+}
 # Modus Operandi needs a person id, so fetch a live one and confirm the endpoint answers.
 try {
     $off = Invoke-RestMethod "$ApiUrl/api/network/top-offenders?limit=1" -TimeoutSec 30

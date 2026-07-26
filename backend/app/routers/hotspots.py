@@ -8,11 +8,13 @@ in functions/.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
+from functools import lru_cache
 
 from fastapi import APIRouter
 
 from app.services import aggregations, firdata, reference
+from app.services.datastore import read_aggregate_or_compute
 
 router = APIRouter(prefix="/api/hotspots", tags=["hotspots"])
 
@@ -23,26 +25,46 @@ def by_district():
     return {"items": [{"district": d, "cases": n} for d, n in counts.most_common()]}
 
 
+@lru_cache(maxsize=32)
+def _cached_clusters(sub_head: str | None, eps_km: float, min_samples: int):
+    """DBSCAN is real clustering work (not a cheap dict rollup) — cache per parameter
+    combo so it only runs once per process, same trade-off as firdata's @lru_cache
+    views. `firdata.cases()` is itself cached and constant for the process lifetime in
+    local mode, so caching on (sub_head, eps_km, min_samples) alone is safe."""
+    rows = firdata.cases()
+    if sub_head:
+        rows = [r for r in rows if r["sub_head"] == sub_head]
+    return aggregations.hotspot_clusters(rows, eps_km=eps_km, min_samples=min_samples)
+
+
 @router.get("/cells")
-def cells(precision: int = 2, sub_head: str | None = None):
-    """Crude grid aggregation (round lat/lon) -> hotspot cells with counts."""
-    grid: dict[tuple, int] = defaultdict(int)
-    for r in firdata.cases():
-        if sub_head and r["sub_head"] != sub_head:
-            continue
-        if r["lat"] is None or r["lon"] is None:
-            continue
-        grid[(round(r["lat"], precision), round(r["lon"], precision))] += 1
-    out = [{"lat": lat, "lon": lon, "count": c} for (lat, lon), c in grid.items()]
-    out.sort(key=lambda x: x["count"], reverse=True)
-    return {"precision": precision, "items": out[:500]}
+def cells(sub_head: str | None = None, eps_km: float = 1.5, min_samples: int = 6):
+    """DBSCAN density clusters (haversine) -> hotspot cells with counts.
+
+    Real spatial clustering, not grid-rounding: dense areas are kept as clusters,
+    isolated/sparse points are dropped as noise rather than each counted as their own
+    "hotspot" the way a naive grid would.
+
+    In catalyst mode this reads the `hotspot_cells` table the nightly job already
+    wrote (state-wide, default params) instead of recomputing — but a `sub_head`
+    filter or non-default eps/min_samples always needs a live recompute, since the
+    precomputed table only covers the state-wide default slice."""
+    if sub_head or eps_km != 1.5 or min_samples != 6:
+        items = _cached_clusters(sub_head, eps_km, min_samples)
+    else:
+        items = read_aggregate_or_compute("hotspot_cells", lambda: _cached_clusters(None, 1.5, 6))
+    return {"method": f"DBSCAN (haversine, eps={eps_km}km, min_samples={min_samples})", "items": items}
 
 
 @router.get("/districts")
 def districts():
     """Per-district choropleth metrics (volume, per-capita rate, heinous share,
     chargesheet rate, pendency, risk, centroid)."""
-    return {"items": aggregations.district_stats(firdata.cases(), reference.socioeconomic())}
+    items = read_aggregate_or_compute(
+        "district_stats",
+        lambda: aggregations.district_stats(firdata.cases(), reference.socioeconomic()),
+    )
+    return {"items": items}
 
 
 @router.get("/stations")

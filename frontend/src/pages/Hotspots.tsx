@@ -177,7 +177,7 @@ export default function Hotspots() {
         icon={MapPinned}
         eyebrow="Geospatial Intelligence"
         title="Crime Hotspots"
-        subtitle="District choropleth, kernel-density heat, and emerging-trend red zones"
+        subtitle="District choropleth, DBSCAN density-cluster heat, and emerging-trend red zones"
         actions={
           spikes.data ? (
             <Badge variant={spikes.data.count ? "danger" : "success"} dot>
@@ -190,7 +190,7 @@ export default function Hotspots() {
       <Panel
         icon={view === "heat" ? Flame : Building2}
         title={view === "heat" ? "Crime density surface" : "District overview"}
-        subtitle={view === "heat" ? "Kernel-density of case locations (CaseMaster GPS)" : "Sized by volume, shaded by " + (metric === "risk" ? "risk" : metric === "rate" ? "crime rate per 100k" : "chargesheet rate")}
+        subtitle={view === "heat" ? "DBSCAN density clusters of case locations (CaseMaster GPS, haversine distance)" : "Sized by volume, shaded by " + (metric === "risk" ? "risk" : metric === "rate" ? "crime rate per 100k" : "chargesheet rate")}
         bodyClassName="p-0"
         actions={
           <div className="flex items-center gap-2">
@@ -260,10 +260,20 @@ export default function Hotspots() {
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Top stations</div>
                 <div style={{ height: 260 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={(station.data?.stations ?? []).slice(0, 8)} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                    <BarChart
+                      data={(station.data?.stations ?? []).slice(0, 8).map((s) => ({
+                        ...s,
+                        // Drop the redundant leading district name (we're already drilled
+                        // into that district) so the station label doesn't get clipped
+                        // against the axis — e.g. "Belagavi Police Station 3" -> "Police Station 3".
+                        station: selected && s.station.startsWith(selected) ? s.station.slice(selected.length).trim() : s.station,
+                      }))}
+                      layout="vertical"
+                      margin={{ left: 8, right: 16, top: 4, bottom: 4 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
                       <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
-                      <YAxis type="category" dataKey="station" tick={{ ...CHART.axisTick, fontSize: 10 }} tickLine={false} axisLine={false} width={120} />
+                      <YAxis type="category" dataKey="station" tick={{ ...CHART.axisTick, fontSize: 10 }} tickLine={false} axisLine={false} width={140} />
                       <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
                       <Bar dataKey="cases" radius={[0, 4, 4, 0]} maxBarSize={18}>
                         {(station.data?.stations ?? []).slice(0, 8).map((_, i) => <Cell key={i} fill={CHART.accent} />)}

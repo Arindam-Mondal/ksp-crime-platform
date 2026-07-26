@@ -18,7 +18,7 @@ by the Cron functions (precompute-and-serve, see CLAUDE.md).
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from functools import lru_cache
 from typing import Any
@@ -339,3 +339,51 @@ def co_accused_adjacency() -> dict[str, dict]:
                 adj[a][b] += 1
                 adj[b][a] += 1
     return adj
+
+
+@lru_cache(maxsize=1)
+def communities() -> dict[str, Any]:
+    """Organized-crime-structure detection: Louvain community detection over the full
+    co-accused graph (networkx.community.louvain_communities), not just direct/ego
+    pairwise links.
+
+    The ego graphs in /api/network/ego only ever show a hand-picked offender's
+    immediate neighborhood. This groups every resolved offender with 2+ linked FIRs
+    into modularity-optimal clusters — the actual "reveal organized crime structures"
+    ask — and is cached for the process lifetime since the underlying case data doesn't
+    change at runtime in local mode."""
+    import networkx as nx
+
+    adj = co_accused_adjacency()
+    off = offenders()["by_id"]
+    g = nx.Graph()
+    for a, neighbors in adj.items():
+        for b, weight in neighbors.items():
+            g.add_edge(a, b, weight=weight)
+    if g.number_of_nodes() == 0:
+        return {"by_person": {}, "clusters": []}
+
+    # resolution > 1 biases Louvain toward smaller, tighter groups — at resolution=1 the
+    # whole graph collapses into a handful of 100+-member mega-components (everyone is
+    # weakly reachable from everyone else through a long chain of one-off co-accused
+    # links), which reads as noise, not "organized crime structures". resolution=12 was
+    # tuned against this dataset to produce cohesive cells (~10-30 members, median ~15).
+    raw = nx.community.louvain_communities(g, weight="weight", seed=42, resolution=12.0)
+    by_person: dict[str, int] = {}
+    clusters = []
+    for cid, members in enumerate(raw):
+        if len(members) < 3:
+            continue  # pairs/singletons aren't a "structure" worth surfacing
+        for m in members:
+            by_person[m] = cid
+        districts = Counter(d for m in members for d in off.get(m, {}).get("districts", []))
+        total_cases = sum(off.get(m, {}).get("n_cases", 0) for m in members)
+        clusters.append({
+            "id": cid,
+            "size": len(members),
+            "members": sorted(members, key=lambda m: -off.get(m, {}).get("n_cases", 0))[:25],
+            "districts": [d for d, _ in districts.most_common(5)],
+            "total_cases": total_cases,
+        })
+    clusters.sort(key=lambda c: c["size"], reverse=True)
+    return {"by_person": by_person, "clusters": clusters}

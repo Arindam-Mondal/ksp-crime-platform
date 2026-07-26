@@ -157,20 +157,48 @@ All model access already routes through one gate: `backend/app/services/llm.py::
 1. **Enable / request access.** Console → your project → **QuickML** (under AI/ML). If it's gated,
    use the in-console **"Request early access"** for *LLM Serving* (approved per account).
    > 💰 QuickML is the one undisclosed cost — **deploy the model only when demoing and stop it when idle**.
-2. **Serve a model.** QuickML → **LLM Serving** → **Deploy / Serve model** → choose
-   **Qwen 2.5 14B Instruct** (matches `QUICKML_MODEL`). Wait until status = **Running**.
-3. **Copy the connection details** shown for the running endpoint:
-   - Inference **endpoint URL** → `QUICKML_ENDPOINT`
-   - **API key / token** → `QUICKML_API_KEY`
-   - **Model name** → `QUICKML_MODEL` (e.g. `qwen2.5-14b-instruct`)
-4. **Wire it on the AppSail env** (console → AppSail → ksp-api → Configuration → Environment), then redeploy:
+2. **Serve a model.** QuickML → **Generative AI → LLM Serving → Models** → **GLM-4.7-Flash**
+   (Qwen 2.5-14B Instruct was deprecated, cutover 2026-07-31 — GLM-4.7-Flash is the migration
+   target and matches `QUICKML_MODEL`) → deploy → **Endpoints** → publish the chat endpoint.
+   Wait until status = **Running**.
+3. **Collect endpoint + org id**, from the endpoint's own "Model Details" tab in the console
+   (see `backend/app/services/llm.py` for the full contract — no endpoint key or Environment
+   header needed for this endpoint type):
+   - **Endpoint URL** (project id is baked into the path) → `QUICKML_ENDPOINT`
+   - **CATALYST-ORG** (shown in the same Headers box) → `QUICKML_ORG_ID` (NOT
+     `CATALYST_ORG_ID` — AppSail's console rejects that name as reserved)
+4. **Set up auth — refresh-token trio (preferred, never goes stale).** A raw pasted access
+   token expires in 1 hour, so it's not viable for anything that needs to stay live. Instead,
+   generate a **refresh token once** and let the app auto-mint hourly access tokens from it:
+   - api-console.zoho.com → **Self Client** → **Generate Code** tab → scope
+     `QuickML.deployment.READ` → creates a short-lived authorization code.
+   - Exchange it **once** (curl/Postman) for an access token + refresh token:
+     ```
+     POST https://accounts.zoho.in/oauth/v2/token
+       ?client_id=<from the Client Secret tab>&client_secret=<from the Client Secret tab>
+       &grant_type=authorization_code&code=<the code you just generated>
+     ```
+     The response's `refresh_token` **never expires** (until you revoke it).
+   - Set `QUICKML_CLIENT_ID` / `QUICKML_CLIENT_SECRET` (Client Secret tab) and
+     `QUICKML_REFRESH_TOKEN` (from the exchange response). `QuickMLProvider` refreshes the
+     access token itself from here — see `_access_token()` in `llm.py`.
+   - **Fallback:** if you just want a 1-hour test without the exchange step, skip the trio
+     and set `QUICKML_OAUTH_TOKEN` to a token generated directly from Self Client's own
+     "Generate Access Token" flow — it'll work until it expires, then 401.
+5. **Wire it on the AppSail env** (console → AppSail → ksp-api → Configuration → Environment), then redeploy:
    ```
    LLM_PROVIDER=quickml
-   QUICKML_ENDPOINT=<inference url>
-   QUICKML_API_KEY=<key>
-   QUICKML_MODEL=qwen2.5-14b-instruct
+   QUICKML_ENDPOINT=<endpoint url, e.g. https://api.catalyst.zoho.in/quickml/v1/project/<id>/glm/chat>
+   QUICKML_ORG_ID=<org id>
+   QUICKML_MODEL=crm-di-glm47b_30b_it
+   QUICKML_CLIENT_ID=<client id>
+   QUICKML_CLIENT_SECRET=<client secret>
+   QUICKML_REFRESH_TOKEN=<refresh token>
    ```
-5. **Test** (fastest loop is local first — put the 4 vars in `backend/.env`, run the API):
+   If `QUICKML_ENDPOINT`/`QUICKML_ORG_ID` are missing, or neither the refresh-token trio nor
+   `QUICKML_OAUTH_TOKEN` is set, `get_llm()` logs a warning and **silently falls back to mock**
+   rather than erroring — a half-finished setup won't break the app, but won't look "on" either.
+6. **Test** (fastest loop is local first — put the vars in `backend/.env`, run the API):
    ```powershell
    curl -X POST http://localhost:9000/api/assistant/ask -H "Content-Type: application/json" `
      -d '{"question":"Which districts have rising chain snatching?"}'
@@ -178,10 +206,14 @@ All model access already routes through one gate: `backend/app/services/llm.py::
    Expect `"provider":"quickml"` with a real answer; `/api/report` narratives also become real.
    Then repeat against the live API URL.
 
-> ⚠️ **Contract check.** `QuickMLProvider.complete()` is written to the common OpenAI-style chat
-> shape (`messages[]` → `choices[0].message.content`). If your QuickML endpoint expects a
-> different request/response shape, **that one method is the only thing to change** — send me a
-> sample request/response and I'll align it. `LLM_PROVIDER=mock` stays the safe fallback.
+> ⚠️ **Contract check.** Auth headers + body shape above are confirmed from the console's own
+> sample for GLM-4.7-Flash (OpenAI-compatible `messages[]` chat shape, model id
+> `crm-di-glm47b_30b_it`). One loose end: the console's auto-generated code sample shows
+> `Authorization: Bearer YOUR_TOKEN`, which contradicts its own Headers box just above (which says
+> `Zoho-oauthtoken <token>`) — the code currently sends `Zoho-oauthtoken` per the Headers box. If
+> the endpoint 401s, try swapping to `Bearer <token>` — that's the one place to change in
+> `QuickMLProvider.complete()` in `backend/app/services/llm.py`. `LLM_PROVIDER=mock` stays the safe
+> fallback either way.
 
 ---
 
@@ -191,7 +223,7 @@ Move off the bundled CSVs to the real architecture (API reads precomputed aggreg
 
 **6a. Create tables** (console → **Data Store**): the 26 ERD tables (see `ERD_SCHEMA.md` —
 table & column names must match exactly) + the aggregates
-(`hotspot_cells, district_stats, trend_baselines, alerts, risk_scores, anomalies, graph_edges`).
+(`hotspot_cells, district_stats, trend_baselines, alerts, risk_scores, anomalies, graph_edges, communities`).
 
 **6b. Seed the core tables** — use the built-in CLI bulk import, masters first (FK targets),
 then case data. One `ds:import` per CSV in `data/output/` (file name = table name), e.g.:

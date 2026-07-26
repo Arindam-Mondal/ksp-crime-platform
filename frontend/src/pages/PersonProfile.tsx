@@ -426,7 +426,7 @@ export default function PersonProfile() {
           )}
         </Panel>
 
-        <Panel icon={GitBranch} title="Association graph" bodyClassName="p-0">
+        <Panel icon={GitBranch} title="Association graph" subtitle={ego.data && ego.data.nodes.length > 1 ? "Click a node to open that person's profile" : undefined} bodyClassName="p-0">
           {ego.isPending ? (
             <Skeleton className="h-[440px] w-full" />
           ) : ego.data && ego.data.nodes.length > 1 ? (

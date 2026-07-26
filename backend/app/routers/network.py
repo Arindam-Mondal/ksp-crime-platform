@@ -3,9 +3,17 @@ Pillar 2 — criminological network / link analysis + person intelligence.
 
 Built on the entity-resolved accused index (services/firdata.offenders()): Accused
 rows are per-case in the ERD, so the same physical person across FIRs is resolved by
-(name, gender) — mirroring real name-based entity resolution on FIR data. Production
-serves the precomputed `graph_edges` table; a single person's slice is tiny either way.
-"""
+(name, gender) — mirroring real name-based entity resolution on FIR data.
+
+Precompute-and-serve scoping note: unlike hotspots/predictive/alerts (see
+datastore.read_aggregate_or_compute), the endpoints here stay on live compute even in
+catalyst mode. `graph_edges` and `communities` ARE precomputed by graph_job, but every
+endpoint here needs a *derived, per-request slice* of the graph (one person's ego
+network, a ranked top-N, cluster membership joined back to case counts) rather than a
+flat table serve — wiring that correctly means rebuilding co_accused_adjacency() from
+the small graph_edges table instead of the full case view, which touches offenders(),
+mo.py, and every route below. Left as a follow-up rather than risking an unverified
+half-wiring (this whole path is already unrunnable/untestable locally either way)."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -23,6 +31,7 @@ def top_offenders(limit: int = 20):
     """Repeat offenders (resolved identities) ranked by linked FIR count."""
     off = firdata.offenders()["by_id"]
     adj = firdata.co_accused_adjacency()
+    community_of = firdata.communities()["by_person"]
     items = []
     for oid, g in off.items():
         if g["n_cases"] < 2:
@@ -35,6 +44,7 @@ def top_offenders(limit: int = 20):
             "arrests": g["arrests"] + g["surrenders"],
             "districts": len(g["districts"]),
             "associates": len(adj.get(oid, {})),
+            "community_id": community_of.get(oid),
         })
         if len(items) >= limit:
             break
@@ -62,6 +72,7 @@ def ego_graph(person_id: str, depth: int = 1):
                     nxt.add(neighbor)
         frontier = nxt
 
+    community_of = firdata.communities()["by_person"]
     nodes = [
         {
             "id": oid,
@@ -69,6 +80,7 @@ def ego_graph(person_id: str, depth: int = 1):
             "gender": off[oid]["gender"],
             "cases": off[oid]["n_cases"],
             "is_root": oid == person_id,
+            "community_id": community_of.get(oid),
         }
         for oid in seen
     ]
@@ -190,6 +202,16 @@ def modus_operandi(person_id: str, limit: int = 8):
     if person_id not in firdata.offenders()["by_id"]:
         raise HTTPException(status_code=404, detail="person not found")
     return mo.profile(person_id, limit=limit)
+
+
+@router.get("/communities")
+def communities(limit: int = 15):
+    """Organized-crime-structure detection: Louvain community clusters over the full
+    co-accused graph (networkx), not just one offender's direct ego links — this is
+    the "reveal organized crime structures" ask, answered as actual offender groups
+    rather than pairwise connections."""
+    data = firdata.communities()
+    return {"clusters": data["clusters"][:limit], "total_clusters": len(data["clusters"])}
 
 
 @router.get("/relationship/{a}/{b}")

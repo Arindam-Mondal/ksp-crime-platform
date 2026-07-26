@@ -156,6 +156,14 @@ for p in /health /api/analytics/summary /api/analytics/case-funnel \
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$API_URL$p" || echo 000)"
   if [ "$code" = "200" ]; then log "OK   $p"; else log "FAIL $p (HTTP $code)"; fi
 done
+# These three run real ML on first call (DBSCAN / IsolationForest+KMeans / Louvain) and
+# are @lru_cache'd after that — give them real headroom here so (a) we actually catch a
+# regression instead of a false-negative timeout, and (b) this doubles as the warm-up
+# request so the first real visitor doesn't eat the cold-start cost themselves.
+for p in /api/hotspots/cells /api/predictive/anomalies /api/network/communities; do
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$API_URL$p" || echo 000)"
+  if [ "$code" = "200" ]; then log "OK   $p (warmed)"; else log "FAIL $p (HTTP $code)"; fi
+done
 # Modus Operandi needs a person id, so fetch a live one and confirm the endpoint answers.
 offid="$(curl -s --max-time 30 "$API_URL/api/network/top-offenders?limit=1" \
          | sed -n 's/.*"person_id":"\([^"]*\)".*/\1/p' | head -1)"

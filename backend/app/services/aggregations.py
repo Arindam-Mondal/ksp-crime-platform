@@ -16,6 +16,19 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 
+# ------------------------------------------------------------------ ML gate ----
+# Real (not heuristic) methods live behind lazy imports so the module still loads if
+# scikit-learn is ever unavailable at runtime; scikit-learn is a hard requirement
+# (requirements.txt) so this is a defensive fallback, not the expected path.
+
+def _sk():
+    from sklearn.cluster import DBSCAN, KMeans  # noqa: F401
+    from sklearn.ensemble import IsolationForest  # noqa: F401
+    from sklearn.preprocessing import StandardScaler  # noqa: F401
+    import numpy as np  # noqa: F401
+    return DBSCAN, KMeans, IsolationForest, StandardScaler, np
+
+
 # ---------------------------------------------------------------- helpers ----
 def _parse(dt: str) -> datetime | None:
     try:
@@ -41,6 +54,49 @@ def district_centroids(cases: list[dict]) -> dict[str, tuple[float, float]]:
             acc[c["district"]].append((c["lat"], c["lon"]))
     return {d: (sum(x[0] for x in pts) / len(pts), sum(x[1] for x in pts) / len(pts))
             for d, pts in acc.items() if pts}
+
+
+def hotspot_clusters(cases: list[dict], eps_km: float = 1.5, min_samples: int = 6,
+                      top: int = 500) -> list[dict]:
+    """Density-based hotspot detection via DBSCAN over haversine distance.
+
+    Replaces naive lat/lon grid-rounding with the DBSCAN method actually named in
+    project_tech_stack.md / CLAUDE.md: points are clustered by real geographic density
+    (eps_km radius, min_samples core-point threshold), and sparse/isolated cases are
+    dropped as noise rather than counted as their own 1-case "hotspot" the way grid
+    binning would. Falls back to grid-rounding only if scikit-learn is unavailable.
+    Returns one row per cluster: centroid + member count, sorted densest-first — same
+    shape the grid method returned, so callers/consumers don't need to change."""
+    pts = [(c["lat"], c["lon"]) for c in cases if c.get("lat") is not None and c.get("lon") is not None]
+    if len(pts) < min_samples:
+        return []
+    try:
+        DBSCAN, _, _, _, np = _sk()
+        coords = np.radians(np.array(pts))
+        earth_radius_km = 6371.0088
+        eps = eps_km / earth_radius_km
+        labels = DBSCAN(eps=eps, min_samples=min_samples, metric="haversine",
+                        algorithm="ball_tree").fit_predict(coords)
+        clusters: dict[int, list[tuple[float, float]]] = defaultdict(list)
+        for (lat, lon), label in zip(pts, labels):
+            if label == -1:  # noise — not a real density cluster
+                continue
+            clusters[int(label)].append((lat, lon))
+        out = [
+            {"lat": round(sum(p[0] for p in members) / len(members), 5),
+             "lon": round(sum(p[1] for p in members) / len(members), 5),
+             "count": len(members)}
+            for members in clusters.values()
+        ]
+        out.sort(key=lambda x: x["count"], reverse=True)
+        return out[:top]
+    except ImportError:  # pragma: no cover — scikit-learn is a hard dependency
+        grid: dict[tuple, int] = defaultdict(int)
+        for lat, lon in pts:
+            grid[(round(lat, 2), round(lon, 2))] += 1
+        out = [{"lat": lat, "lon": lon, "count": n} for (lat, lon), n in grid.items()]
+        out.sort(key=lambda x: x["count"], reverse=True)
+        return out[:top]
 
 
 def pearson_r(xs: list[float], ys: list[float]) -> float | None:
@@ -170,6 +226,69 @@ def anomalies(cases: list[dict], top_n: int = 12) -> list[dict]:
     return out[:top_n]
 
 
+def multivariate_anomalies(cases: list[dict], contamination: float = 0.08,
+                            top_n: int = 8) -> list[dict]:
+    """Genuine ML anomaly detection: IsolationForest over district-month feature
+    vectors (volume, heinous share, chargesheet rate, pendency).
+
+    Complements the z-score checks above, which are univariate (one signal at a time).
+    IsolationForest catches multivariate outliers — a district-month whose *combination*
+    of signals is unusual even if no single signal crosses a z-score threshold on its
+    own. This is a trained scikit-learn ensemble model, not a hand-tuned formula."""
+    by_dm: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for c in cases:
+        d = _parse(c.get("incident", ""))
+        if d and c.get("district"):
+            by_dm[(c["district"], d.strftime("%Y-%m"))].append(c)
+
+    keys, rows = [], []
+    for (district, month), recs in by_dm.items():
+        n = len(recs)
+        if n < 5:
+            continue
+        heinous_share = sum(1 for r in recs if r.get("heinous")) / n
+        finals = [r for r in recs if r.get("cstype")]
+        cs_rate = sum(1 for r in finals if r["cstype"] == "A") / len(finals) if finals else 0.0
+        pendency = sum(1 for r in recs if r.get("status_id") == 1) / n
+        keys.append((district, month, n, heinous_share, cs_rate, pendency))
+        rows.append([n, heinous_share, cs_rate, pendency])
+
+    if len(rows) < 20:
+        return []
+
+    try:
+        _, _, IsolationForest, _, np = _sk()
+        X = np.array(rows, dtype=float)
+        model = IsolationForest(n_estimators=200, contamination=contamination, random_state=42)
+        pred = model.fit_predict(X)
+        scores = model.score_samples(X)  # lower (more negative) = more anomalous
+        cutoff = float(np.percentile(scores, 8))
+    except ImportError:  # pragma: no cover — scikit-learn is a hard dependency
+        return []
+
+    out = []
+    for (district, month, n, heinous_share, cs_rate, pendency), label, score in zip(keys, pred, scores):
+        if label != -1:
+            continue
+        out.append({
+            "kind": "multivariate",
+            "subject": district,
+            "period": month,
+            "observed": n,
+            "expected": None,
+            "z": round(float(-score), 3),
+            "severity": "High" if score <= cutoff else "Medium",
+            "description": f"{district} in {month}: an unusual combination of volume "
+                            f"({n}), heinous share ({heinous_share*100:.0f}%), chargesheet "
+                            f"rate ({cs_rate*100:.0f}%) and pendency ({pendency*100:.0f}%) — "
+                            f"flagged by IsolationForest across every district-month, not "
+                            f"any single threshold.",
+            "method": "isolation_forest",
+        })
+    out.sort(key=lambda a: a["z"], reverse=True)
+    return out[:top_n]
+
+
 # ------------------------------------------ D: district stats + drill-down ----
 def district_stats(cases: list[dict], socio: dict[str, dict] | None = None) -> list[dict]:
     """Per-district rollup: volume, per-capita rate, heinous share, chargesheet rate,
@@ -232,6 +351,44 @@ def district_stats(cases: list[dict], socio: dict[str, dict] | None = None) -> l
         })
     items.sort(key=lambda x: x["cases"], reverse=True)
     return items
+
+
+def ml_risk_tiers(items: list[dict], k: int = 3) -> dict[str, str]:
+    """Unsupervised risk tiering via KMeans, as a genuine ML complement to the
+    transparent heuristic risk_score above.
+
+    There's no labeled "this district was actually high-risk" ground truth in a
+    synthetic dataset, so a supervised model here would be fabricated, not real ML —
+    KMeans clustering on the same multivariate feature set is the honest unsupervised
+    alternative: districts are grouped by the natural structure in their crime profile
+    rather than a hand-weighted sum. Tiers are ranked by mean heuristic risk_score
+    within each cluster so "High" still means what a reader expects."""
+    if len(items) < k:
+        return {}
+    try:
+        _, KMeans, _, StandardScaler, np = _sk()
+    except ImportError:  # pragma: no cover — scikit-learn is a hard dependency
+        return {}
+
+    feats = np.array([
+        [it["cases"], it.get("per_100k") or 0, it["heinous_share"], it["pendency_rate"], it["recent_90d"]]
+        for it in items
+    ], dtype=float)
+    X = StandardScaler().fit_transform(feats)
+    labels = KMeans(n_clusters=k, n_init=10, random_state=42).fit_predict(X)
+
+    cluster_mean_risk = {}
+    for cluster in set(labels):
+        idx = [i for i, c in enumerate(labels) if c == cluster]
+        cluster_mean_risk[cluster] = sum(items[i]["risk_score"] for i in idx) / len(idx)
+    ranked = sorted(cluster_mean_risk, key=lambda c: cluster_mean_risk[c], reverse=True)
+    tier_names = ["High", "Medium", "Low"] if k == 3 else [f"Tier {i + 1}" for i in range(k)]
+    rank_of = {cluster: i for i, cluster in enumerate(ranked)}
+
+    return {
+        items[i]["district"]: tier_names[rank_of[cluster]] if rank_of[cluster] < len(tier_names) else f"Tier {rank_of[cluster] + 1}"
+        for i, cluster in enumerate(labels)
+    }
 
 
 def socioeconomic_correlation(cases: list[dict], socio: dict[str, dict]) -> dict:

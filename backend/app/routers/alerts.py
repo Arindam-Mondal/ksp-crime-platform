@@ -10,11 +10,12 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.services import aggregations, firdata
+from app.services.datastore import read_aggregate_or_compute
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
 @router.get("/spikes")
 def spikes():
-    items = aggregations.spike_alerts(firdata.cases())
+    items = read_aggregate_or_compute("alerts", lambda: aggregations.spike_alerts(firdata.cases()))
     return {"count": len(items), "items": items}

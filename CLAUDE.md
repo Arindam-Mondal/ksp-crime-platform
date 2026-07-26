@@ -27,7 +27,7 @@ Maps (MapLibre + OSM) and the graph (Cytoscape.js) render client-side — Cataly
 ```
 
 ### The one pattern that governs everything: **precompute-and-serve**
-Heavy math (DBSCAN/KDE hotspots, networkx centrality, AutoML scoring, spike/anomaly detection) runs in **Cron/Event Functions** (15-min limit) and writes compact rows to *aggregate tables* (`hotspot_cells`, `district_stats`, `risk_scores`, `trend_baselines`, `anomalies`, `alerts`, `graph_edges`). The **FastAPI request path only reads those aggregates** — never compute heavy work in a request handler. This is why we respect the two hard Catalyst limits below.
+Heavy math (DBSCAN hotspot clustering, networkx centrality + Louvain community detection, heuristic + KMeans risk tiering, z-score + IsolationForest anomaly detection) runs in **Cron/Event Functions** (15-min limit) and writes compact rows to *aggregate tables* (`hotspot_cells`, `district_stats`, `risk_scores`, `trend_baselines`, `anomalies`, `alerts`, `graph_edges`, `communities`). The **FastAPI request path only reads those aggregates** — never compute heavy work in a request handler. This is why we respect the two hard Catalyst limits below.
 
 ## Hard constraints — do not violate
 - **Data Store: max 300 rows per query.** Always paginate; serve precomputed aggregates, not raw scans.
@@ -93,10 +93,11 @@ Core (26 ERD tables): `CaseMaster` hub + party tables (`ComplainantDetails`, `Vi
 (`CaseCategory`, `GravityOffence`, `CaseStatusMaster`, `CasteMaster`, `ReligionMaster`,
 `OccupationMaster`), and organisation (`State`, `District`, `Unit`, `UnitType`, `Rank`,
 `Designation`, `Employee`, `Court`).
-Precomputed by jobs: `graph_edges`, `hotspot_cells`, `district_stats`, `risk_scores`, `trend_baselines`, `anomalies`, `alerts`.
+Precomputed by jobs: `graph_edges`, `communities`, `hotspot_cells`, `district_stats`, `risk_scores`, `trend_baselines`, `anomalies`, `alerts`.
 Accused identity across FIRs is resolved analytics-side by (AccusedName, GenderID) — never add columns to the ERD tables.
 
-## Build phases (current: Phase 0 — Foundation)
-0. Foundation: scaffold, auth, deploy skeletons, synthetic data. ← we are here
-1. Geospatial hotspots · 2. Network/link analysis · 3. Predictive & anomaly AI · 4. NL query + AI reports · 5. Polish.
-Full detail in `project_tech_stack.md` §6.
+## Build phases (current: Phase 3–4 — feature-complete demo, hardening in progress)
+0. Foundation: scaffold, deploy skeletons, synthetic data. ✅ done (auth still outstanding — tracked separately).
+1. Geospatial hotspots ✅ · 2. Network/link analysis ✅ · 3. Predictive & anomaly AI ✅ (heuristic; QuickML/AutoML swap-in in progress)
+4. NL query + AI reports ✅ (mock LLM by default; QuickML wiring in progress) · 5. Polish ← we are here
+All four analytical pillars are demoable end-to-end locally. Remaining gaps before this matches the phase-0 doc's original plan: role-based auth, real ML models behind the heuristic endpoints (Phase 2 items below), and wiring the precompute-and-serve read path in catalyst mode. Full original detail in `project_tech_stack.md` §6.

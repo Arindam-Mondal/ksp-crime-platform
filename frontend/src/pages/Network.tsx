@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Share2, Search, Users, GitBranch, RefreshCw } from "lucide-react";
+import { Share2, Search, Users, GitBranch, RefreshCw, Boxes } from "lucide-react";
 import { api } from "../lib/api";
 import Panel from "../components/Panel";
 import PageHeader from "../components/PageHeader";
@@ -17,6 +17,7 @@ export default function Network() {
   const navigate = useNavigate();
 
   const offenders = useQuery({ queryKey: ["topOffenders"], queryFn: api.topOffenders });
+  const communities = useQuery({ queryKey: ["communities"], queryFn: api.communities });
   const ego = useQuery({
     queryKey: ["ego", selected],
     queryFn: () => api.ego(selected!),
@@ -170,6 +171,47 @@ export default function Network() {
           </Panel>
         </div>
       </div>
+
+      <Panel
+        icon={Boxes}
+        title="Detected criminal clusters"
+        subtitle={
+          communities.data
+            ? `${communities.data.total_clusters} cluster${communities.data.total_clusters === 1 ? "" : "s"} of 3+ mutually-linked offenders — Louvain community detection over the full co-accused graph, not just one person's direct links`
+            : "Louvain community detection over the full co-accused graph"
+        }
+      >
+        {communities.isPending ? (
+          <ListSkeleton rows={4} />
+        ) : communities.isError ? (
+          <EmptyState
+            icon={Boxes}
+            title="Couldn't load clusters"
+            hint="The /api/network/communities endpoint didn't respond — if you just pulled these changes, restart the backend server so it picks up the new route, then reload this page."
+          />
+        ) : !communities.data || communities.data.clusters.length === 0 ? (
+          <EmptyState icon={Boxes} title="No clusters detected" hint="No group of 3+ offenders is densely enough linked yet to form a cluster." />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {communities.data.clusters.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelected(c.members[0])}
+                className="rounded-xl border border-line bg-surface-2/40 p-3.5 text-left transition-colors hover:border-accent/40 hover:bg-surface-2/70"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-white/90">Cluster #{c.id}</span>
+                  <Badge variant="accent">{c.size} members</Badge>
+                </div>
+                <div className="mt-1.5 text-[11px] text-muted">
+                  {c.total_cases} linked FIRs · spans {c.districts.slice(0, 3).join(", ")}
+                  {c.districts.length > 3 ? ` +${c.districts.length - 3}` : ""}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

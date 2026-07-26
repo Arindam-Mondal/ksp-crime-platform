@@ -141,11 +141,15 @@ export interface MoProfile { signature: MoSignature; matches: MoMatch[] }
 // --- network / person ---
 export interface OffenderCount {
   person_id: string; name: string; gender: string; cases: number;
-  arrests: number; districts: number; associates: number;
+  arrests: number; districts: number; associates: number; community_id: number | null;
 }
-export interface EgoNode { id: string; name: string; gender: string; cases: number; is_root: boolean }
+export interface EgoNode { id: string; name: string; gender: string; cases: number; is_root: boolean; community_id: number | null }
 export interface EgoEdge { source: string; target: string; weight: number }
 export interface EgoGraph { root: string; nodes: EgoNode[]; edges: EgoEdge[] }
+
+export interface Community {
+  id: number; size: number; members: string[]; districts: string[]; total_cases: number;
+}
 
 export interface CrimeRow {
   id: number; crime_no: string; sub_head: string; head: string; gravity: string;
@@ -242,6 +246,7 @@ export const api = {
   // Network
   topOffenders: () => get<{ items: OffenderCount[] }>("/api/network/top-offenders"),
   ego: (personId: string) => get<EgoGraph>(`/api/network/ego/${personId}`),
+  communities: () => get<{ clusters: Community[]; total_clusters: number }>("/api/network/communities"),
   person: (personId: string) => get<PersonProfile>(`/api/network/person/${personId}`),
   mo: (personId: string) => get<MoProfile>(`/api/network/mo/${personId}`),
   relationship: (a: string, b: string) => get<Relationship>(`/api/network/relationship/${a}/${b}`),

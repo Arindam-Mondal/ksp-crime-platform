@@ -28,7 +28,7 @@ export default function Assistant() {
         icon={Sparkles}
         eyebrow="Natural-Language Intelligence"
         title="Ask the Data"
-        subtitle="Query incidents in plain language — grounded answers via QuickML RAG"
+        subtitle="Query incidents in plain language — grounded on retrieved case records (QuickML RAG when configured, keyword retrieval otherwise)"
       />
 
       <Panel icon={MessageSquareText} title="Conversational query">

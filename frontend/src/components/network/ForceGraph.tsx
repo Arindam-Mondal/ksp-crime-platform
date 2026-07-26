@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { Maximize2, Plus, Minus, RefreshCw } from "lucide-react";
 import type { EgoNode, EgoEdge } from "../../lib/api";
-import { avatarUrl, initials, tileColor } from "../../lib/avatar";
+import { initials, tileColor } from "../../lib/avatar";
 
 const EDGE_LO = [40, 52, 79]; // #28344f
 const EDGE_HI = [91, 127, 255]; // #5b7fff
@@ -32,9 +32,7 @@ export default function ForceGraph({
 }) {
   const fgRef = useRef<any>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const imagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [width, setWidth] = useState(640);
-  const [ver, setVer] = useState(0); // bump to force a repaint when avatars load
   const [hoverId, setHoverId] = useState<string | null>(null);
 
   // Fresh, mutable copies (react-force-graph mutates node/link objects in place).
@@ -64,18 +62,6 @@ export default function ForceGraph({
     return s;
   }, [hoverId, neighbors]);
 
-  // Preload avatar portraits; repaint as each arrives.
-  useEffect(() => {
-    nodes.forEach((n) => {
-      if (imagesRef.current.has(n.id)) return;
-      const img = new Image();
-      img.onload = () => setVer((v) => v + 1);
-      img.onerror = () => imagesRef.current.set(n.id, img); // keep (incomplete) -> initials fallback
-      img.src = avatarUrl(n.id, n.gender);
-      imagesRef.current.set(n.id, img);
-    });
-  }, [nodes]);
-
   // Responsive width.
   useEffect(() => {
     if (!wrapRef.current) return;
@@ -103,24 +89,16 @@ export default function ForceGraph({
       ctx.save();
       ctx.globalAlpha = faded ? 0.12 : 1;
 
-      // avatar (clipped) or initials disc
-      const img = imagesRef.current.get(node.id);
+      // initials disc (deliberately no photo — see lib/avatar.ts)
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-      if (img && img.complete && img.naturalWidth > 0) {
-        ctx.save();
-        ctx.clip();
-        ctx.drawImage(img, node.x - r, node.y - r, r * 2, r * 2);
-        ctx.restore();
-      } else {
-        ctx.fillStyle = tileColor(node.id);
-        ctx.fill();
-        ctx.fillStyle = "#fff";
-        ctx.font = `700 ${r * 0.85}px JetBrains Mono, monospace`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(initials(node.name), node.x, node.y);
-      }
+      ctx.fillStyle = tileColor(node.id);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = `700 ${r * 0.85}px JetBrains Mono, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(initials(node.name), node.x, node.y);
 
       // ring (red glow for the focus offender)
       if (node.is_root) {
@@ -150,7 +128,7 @@ export default function ForceGraph({
       }
       ctx.restore();
     },
-    [highlightNodes, ver, nodeScale]
+    [highlightNodes, nodeScale]
   );
 
   const pointerArea = useCallback((node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -212,7 +190,10 @@ export default function ForceGraph({
         linkDirectionalParticles={(l: any) => (l.weight >= 2 ? Math.min(4, l.weight) : 0)}
         linkDirectionalParticleWidth={(l: any) => 1 + (l.weight / maxW) * 2}
         linkDirectionalParticleSpeed={0.006}
-        onNodeHover={(n: any) => setHoverId(n ? n.id : null)}
+        onNodeHover={(n: any) => {
+          setHoverId(n ? n.id : null);
+          if (wrapRef.current) wrapRef.current.style.cursor = n ? "pointer" : "default";
+        }}
         onNodeClick={(n: any) => onNodeClick?.(n.id)}
         onBackgroundClick={() => setHoverId(null)}
         cooldownTicks={120}
