@@ -1,0 +1,77 @@
+name: keep-warm
+
+# Keeps the Catalyst AppSail API container from scaling to zero, and — just as important —
+# keeps its in-process caches populated.
+#
+# Why this exists: every expensive view in the backend is @lru_cache'd for the process
+# lifetime (firdata.cases(), routers/hotspots.py:28 DBSCAN, routers/predictive.py:23
+# IsolationForest, firdata.communities() Louvain). Nothing is slow once warm — measured
+# 77-205 ms. The cost is paid entirely by whoever sends the FIRST request after the
+# container dies: 2.5-3.3 s on the common endpoints, 3.8 s on /api/hotspots/cells.
+# This workflow makes that first request come from a robot instead of a user.
+#
+# NOTE: GitHub only registers `schedule:` for workflow files on the DEFAULT branch.
+# This repo's default branch is `chore/deploy-prep` (confirmed via
+# `git ls-remote --symref origin HEAD`; `main` has never been pushed), so pushing this
+# branch is enough — no merge required. If the default is ever switched to main, this
+# file has to move with it or the schedule silently stops firing.
+
+on:
+  schedule:
+    # Every 5 min, 03:00-17:59 UTC = 08:30-23:30 IST. Waking hours only: keeping the
+    # container alive bills the same as an always-on instance (~$0.08/GB-hr), so a 24/7
+    # schedule costs ~$58 of the $250 credit over the ~60-day window vs ~$34 for this.
+    # Minute offset 3-58 rather than */5 — GitHub's scheduled-run queue is longest at the
+    # top of the hour.
+    - cron: "3-58/5 3-17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepwarm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API: https://ksp-api-50043111658.development.catalystappsail.in
+    steps:
+      - name: Warm the API
+        run: |
+          set -uo pipefail
+
+          # /health alone is NOT enough: it never touches the DBSCAN / IsolationForest /
+          # Louvain code paths, so those caches would stay empty and the first user to open
+          # Hotspots after a restart would still wait ~3.8 s. Ping them explicitly — they
+          # are lru_cached, so only the first call in a container's life actually computes.
+          PATHS="/health /api/hotspots/cells /api/predictive/anomalies /api/network/communities"
+
+          fail=0
+
+          # Each run self-pings for ~5 minutes. GitHub's cron minimum is 5 min AND delivery
+          # is best-effort (routinely 5-20 min late), while the container idles out at
+          # ~5 min — so a bare */5 schedule would leave gaps. Covering 5 min of wall-clock
+          # per run closes them.
+          for i in $(seq 1 6); do
+            echo "--- pass $i/6 ---"
+            for p in $PATHS; do
+              if ! curl -fsS --max-time 90 -o /dev/null \
+                        -w "  %{http_code}  %{time_total}s  $p"$'\n' "$API$p"; then
+                echo "::warning::pass $i: $p failed"
+                fail=$((fail + 1))
+              fi
+            done
+            if [ "$i" -lt 6 ]; then sleep 50; fi
+          done
+
+          # Don't fail the job on a single blip — a red Actions tab you learn to ignore is
+          # worse than no signal. Only shout if essentially everything failed.
+          echo "failed pings: $fail / 24"
+          if [ "$fail" -ge 20 ]; then
+            echo "::error::keep-warm could not reach the API ($fail/24 pings failed)"
+            exit 1
+          fi
