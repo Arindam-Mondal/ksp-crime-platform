@@ -81,6 +81,7 @@ catalyst login; catalyst init; catalyst deploy
 ## Conventions
 - **Backend:** Python 3.9+ (AppSail-compatible — avoid 3.10+-only syntax in shipped code). FastAPI + Pydantic models for every response. New analytical endpoints read aggregate tables only.
 - **New heavy computation** → add a job under `functions/`, write results to an aggregate table, then expose a thin read endpoint. Never inline it in a request handler.
+- **Memoise with `@cached` from `app/services/cache.py`, never `functools.lru_cache`.** `lru_cache` releases its lock across the wrapped call, so the ~12 concurrent requests a page opens with each recompute the same thing. Then add the new cache to the warm set in `app/warmup.py` so a restarted container fills it before a user asks. See `docs/KEEPWARM.md`.
 - **All LLM/RAG access** goes through `backend/app/services/llm.py`. Do not import an LLM SDK anywhere else.
 - **Data access** goes through `backend/app/services/datastore.py` so local (CSV) and Catalyst (SDK) modes stay interchangeable.
 - **Frontend:** React function components + hooks, TanStack Query for server state, Tailwind for styling. Maps = MapLibre GL JS, graph = Cytoscape.js, charts = Recharts.

@@ -10,35 +10,25 @@ fabricated supervised model — are the honest way to add real ML here).
 """
 from __future__ import annotations
 
-from functools import lru_cache
-
 from fastapi import APIRouter
 
-from app.services import aggregations, firdata, reference
+from app.services import aggregations, derived, firdata
+from app.services.cache import cached
 from app.services.datastore import read_aggregate_or_compute
 
 router = APIRouter(prefix="/api/predictive", tags=["predictive"])
 
 
-@lru_cache(maxsize=1)
+@cached()
 def _cached_multivariate_anomalies():
     """IsolationForest fit is real model-training work, not a cheap rollup — cache it
     per process lifetime, same trade-off as the DBSCAN cache in routers/hotspots.py."""
     return aggregations.multivariate_anomalies(firdata.cases())
 
 
-def _compute_risk_scores():
-    items = aggregations.district_stats(firdata.cases(), reference.socioeconomic())
-    items = sorted(items, key=lambda x: x["risk_score"], reverse=True)
-    ml_tier = aggregations.ml_risk_tiers(items)
-    for it in items:
-        it["ml_tier"] = ml_tier.get(it["district"])
-    return items
-
-
 @router.get("/risk-scores")
 def risk_scores():
-    items = read_aggregate_or_compute("risk_scores", _compute_risk_scores)
+    items = read_aggregate_or_compute("risk_scores", derived.risk_scores)
     return {"method": "heuristic risk_score: 30% volume + 20% per-capita rate (Census 2011) + "
                       "20% heinous share + 15% pendency + 15% 90-day momentum, ranked primary; "
                       "ml_tier: unsupervised KMeans clustering over the same feature set as a "
@@ -48,7 +38,9 @@ def risk_scores():
 
 
 def _compute_anomalies():
-    items = aggregations.anomalies(firdata.cases()) + _cached_multivariate_anomalies()
+    # Both halves are cached views; the concat below builds a fresh list, so the sort
+    # never reorders anything the caches still hold.
+    items = derived.anomalies() + _cached_multivariate_anomalies()
     items.sort(key=lambda a: abs(a["z"]), reverse=True)
     return items
 

@@ -14,7 +14,7 @@ import re
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.services import aggregations, firdata
+from app.services import derived, firdata
 from app.services.llm import get_llm
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -32,7 +32,7 @@ _NETWORK_TERMS = {"offender", "offenders", "connected", "network", "cluster", "c
 
 
 def _hotspot_context(top_n: int = 5) -> list[str]:
-    stats = aggregations.district_stats(firdata.cases())[:top_n]
+    stats = derived.district_stats(with_socio=False)[:top_n]
     return [
         f"{d['district']}: {d['cases']} cases, {d['heinous_share']}% heinous, "
         f"{d['recent_90d']} in the last 90 days, risk score {d['risk_score']}."

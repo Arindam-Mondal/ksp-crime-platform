@@ -6,9 +6,13 @@ Run locally:  uvicorn app.main:app --reload --port 9000
 """
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import warmup
 from app.config import get_settings
 from app.routers import (
     alerts,
@@ -24,11 +28,27 @@ from app.routers import (
 
 settings = get_settings()
 
+# gunicorn owns stdout on AppSail; without this the warm-up timings never reach the logs.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Warm the analytical caches at boot so the first visitor doesn't pay for them.
+
+    Backgrounded on purpose — see warmup.warm_in_background() for why blocking startup is
+    the wrong trade on AppSail.
+    """
+    warmup.warm_in_background()
+    yield
+
+
 app = FastAPI(
     title="KSP Crime Intelligence Platform API",
     version="0.1.0",
     description="Geospatial hotspots, network/link analysis, predictive AI, and NL query "
                 "over Karnataka crime data. Serves precomputed aggregates (see CLAUDE.md).",
+    lifespan=lifespan,
 )
 
 # On Catalyst the AppSail gateway already emits CORS headers; adding ours too duplicates

@@ -17,6 +17,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.config import get_settings
+from app.services.cache import cached
 
 
 class DataStore:
@@ -33,7 +34,9 @@ class LocalCsvStore(DataStore):
         # Resolve relative to the backend working directory.
         self.data_dir = os.path.abspath(data_dir)
 
-    @lru_cache(maxsize=32)
+    # `cached`, not `lru_cache`: on a cold process ~12 concurrent requests all reach for
+    # CaseMaster at once, and lru_cache would let every one of them parse the 8.1 MB file.
+    @cached(maxsize=32)
     def rows(self, table: str) -> list[dict[str, Any]]:
         path = os.path.join(self.data_dir, f"{table}.csv")
         if not os.path.exists(path):

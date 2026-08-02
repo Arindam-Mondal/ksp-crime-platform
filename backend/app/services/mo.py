@@ -19,9 +19,9 @@ graph), so it stays off the heavy path.
 from __future__ import annotations
 
 from collections import Counter
-from functools import lru_cache
 
 from app.services import firdata
+from app.services.cache import cached
 
 # Weights for the composite MO similarity (sum to 1.0). Crime-type dominates, the legal
 # section fingerprint and timing refine it.
@@ -116,7 +116,7 @@ def public_signature(sig: dict) -> dict:
     }
 
 
-@lru_cache(maxsize=1)
+@cached()
 def _repeat_signatures() -> dict[str, dict]:
     """Raw MO signature for every repeat offender (n_cases >= 2). Cached — the underlying
     synthetic data is static in local mode; the Cron rebuild handles catalyst mode."""

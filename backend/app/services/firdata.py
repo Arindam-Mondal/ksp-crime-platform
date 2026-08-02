@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
-from functools import lru_cache
 from typing import Any
 
+from app.services.cache import cached
 from app.services.datastore import get_store
 
 GENDER = {1: "M", 2: "F", 3: "T"}
@@ -54,7 +54,7 @@ def _dt(v: str) -> datetime | None:
     return None
 
 
-@lru_cache(maxsize=1)
+@cached()
 def lookups() -> dict[str, Any]:
     store = get_store()
     states = {_int(r["StateID"]): r["StateName"] for r in store.rows("State")}
@@ -113,7 +113,7 @@ def lookups() -> dict[str, Any]:
     }
 
 
-@lru_cache(maxsize=1)
+@cached()
 def sections_by_case() -> dict[int, list[dict]]:
     lk = lookups()
     out: dict[int, list[dict]] = defaultdict(list)
@@ -129,7 +129,7 @@ def sections_by_case() -> dict[int, list[dict]]:
     return out
 
 
-@lru_cache(maxsize=1)
+@cached()
 def parties() -> dict[str, dict[int, list[dict]]]:
     lk = lookups()
     victims: dict[int, list[dict]] = defaultdict(list)
@@ -158,7 +158,7 @@ def parties() -> dict[str, dict[int, list[dict]]]:
     return {"victims": victims, "accused": accused, "complainants": complainants}
 
 
-@lru_cache(maxsize=1)
+@cached()
 def arrests() -> dict[str, Any]:
     """All arrest/surrender rows (resolved) + per-case and per-accused indexes."""
     lk = lookups()
@@ -186,7 +186,7 @@ def arrests() -> dict[str, Any]:
     return {"rows": rows, "by_case": by_case, "by_accused": by_accused}
 
 
-@lru_cache(maxsize=1)
+@cached()
 def chargesheets_by_case() -> dict[int, dict]:
     out = {}
     for r in get_store().rows("ChargesheetDetails"):
@@ -197,7 +197,7 @@ def chargesheets_by_case() -> dict[int, dict]:
     return out
 
 
-@lru_cache(maxsize=1)
+@cached()
 def cases() -> list[dict]:
     """Denormalised case view — one dict per CaseMaster row."""
     lk = lookups()
@@ -276,12 +276,12 @@ def cases() -> list[dict]:
     return out
 
 
-@lru_cache(maxsize=1)
+@cached()
 def case_index() -> dict[int, dict]:
     return {c["id"]: c for c in cases()}
 
 
-@lru_cache(maxsize=1)
+@cached()
 def offenders() -> dict[str, Any]:
     """Entity-resolved accused index.
 
@@ -327,8 +327,11 @@ def offenders() -> dict[str, Any]:
     return {"by_id": by_id, "by_case": by_case}
 
 
+@cached()
 def co_accused_adjacency() -> dict[str, dict]:
-    """offender_id -> {co_offender_id: shared case count}. Cheap over the resolved index."""
+    """offender_id -> {co_offender_id: shared case count}. Cheap over the resolved index,
+    but called from 7 sites (including inside communities()) — uncached, every network /
+    person / MO request rebuilt the whole adjacency map from scratch."""
     off = offenders()
     adj: dict[str, dict] = defaultdict(lambda: defaultdict(int))
     for oids in off["by_case"].values():
@@ -341,7 +344,7 @@ def co_accused_adjacency() -> dict[str, dict]:
     return adj
 
 
-@lru_cache(maxsize=1)
+@cached()
 def communities() -> dict[str, Any]:
     """Organized-crime-structure detection: Louvain community detection over the full
     co-accused graph (networkx.community.louvain_communities), not just direct/ego

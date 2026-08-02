@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime
 
-from app.services import aggregations, firdata
+from app.services import aggregations, derived, firdata
 from app.services.llm import get_llm
 
 
@@ -55,7 +55,7 @@ def build_report(scope: str = "state", subject_id: str | None = None) -> dict:
     arrests = sum(c["n_arrests"] for c in rows)
 
     alerts = aggregations.spike_alerts(cases_all)
-    anoms = aggregations.anomalies(cases_all)
+    anoms = derived.anomalies()
     if scope == "district" and subject_id:
         alerts = [a for a in alerts if a["district"] == subject_id]
         anoms = [a for a in anoms if a["subject"] == subject_id]

@@ -9,11 +9,10 @@ in functions/.
 from __future__ import annotations
 
 from collections import Counter
-from functools import lru_cache
-
 from fastapi import APIRouter
 
-from app.services import aggregations, firdata, reference
+from app.services import aggregations, derived, firdata
+from app.services.cache import cached
 from app.services.datastore import read_aggregate_or_compute
 
 router = APIRouter(prefix="/api/hotspots", tags=["hotspots"])
@@ -25,12 +24,15 @@ def by_district():
     return {"items": [{"district": d, "cases": n} for d, n in counts.most_common()]}
 
 
-@lru_cache(maxsize=32)
+@cached(maxsize=32)
 def _cached_clusters(sub_head: str | None, eps_km: float, min_samples: int):
     """DBSCAN is real clustering work (not a cheap dict rollup) — cache per parameter
-    combo so it only runs once per process, same trade-off as firdata's @lru_cache
-    views. `firdata.cases()` is itself cached and constant for the process lifetime in
-    local mode, so caching on (sub_head, eps_km, min_samples) alone is safe."""
+    combo so it only runs once per process, same trade-off as firdata's @cached views.
+    `firdata.cases()` is itself cached and constant for the process lifetime in local
+    mode, so caching on (sub_head, eps_km, min_samples) alone is safe.
+
+    Stays bounded at 32: eps_km/min_samples come straight off the query string, so an
+    unbounded cache here would be caller-controlled memory growth."""
     rows = firdata.cases()
     if sub_head:
         rows = [r for r in rows if r["sub_head"] == sub_head]
@@ -60,10 +62,7 @@ def cells(sub_head: str | None = None, eps_km: float = 1.5, min_samples: int = 6
 def districts():
     """Per-district choropleth metrics (volume, per-capita rate, heinous share,
     chargesheet rate, pendency, risk, centroid)."""
-    items = read_aggregate_or_compute(
-        "district_stats",
-        lambda: aggregations.district_stats(firdata.cases(), reference.socioeconomic()),
-    )
+    items = read_aggregate_or_compute("district_stats", derived.district_stats)
     return {"items": items}
 
 
