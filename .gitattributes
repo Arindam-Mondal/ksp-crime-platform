@@ -3,3 +3,8 @@
 *.sh text eol=lf
 # PowerShell is happy either way; pin CRLF for consistency on Windows.
 *.ps1 text eol=crlf
+# Built client bundle: never touch the bytes. Vite names these files by CONTENT HASH
+# (index-<hash>.js), and CDN/browser caching treats that name as a promise about the
+# contents — an autocrlf rewrite would change the bytes while the name stayed put.
+# Also stops `git status` reporting them as modified when nothing has changed.
+client/assets/** -text
