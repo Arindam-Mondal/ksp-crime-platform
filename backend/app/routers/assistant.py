@@ -88,6 +88,7 @@ def _redact(text: str) -> str:
 class AskRequest(BaseModel):
     question: str
     top_k: int = 5
+    lang: str = "en"  # output language only; retrieval stays over the English case text
 
 
 def _retrieve(question: str, top_k: int) -> list[str]:
@@ -108,7 +109,7 @@ def ask(req: AskRequest):
     # Aggregate context first — it's the direct answer for hotspot/network-style
     # questions and the LLM only ever grounds on the first 5 items (see llm.py).
     context = _aggregate_context(req.question) + _retrieve(req.question, req.top_k)
-    result = get_llm().complete(req.question, context=context)
+    result = get_llm().complete(req.question, context=context, lang=req.lang)
     return {
         "question": req.question,
         "answer": result.text,

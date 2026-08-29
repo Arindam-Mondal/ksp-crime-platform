@@ -1,11 +1,15 @@
 import { AlertTriangle, TrendingUp } from "lucide-react";
 import { SpikeAlert } from "../lib/api";
+import { useT } from "../i18n";
+import { useDataLabel } from "../i18n/data";
 import Badge from "./Badge";
 
 export default function AlertsFeed({ items, limit }: { items: SpikeAlert[]; limit?: number }) {
+  const t = useT();
+  const d = useDataLabel();
   const shown = limit ? items.slice(0, limit) : items;
   if (shown.length === 0) {
-    return <div className="px-1 py-6 text-center text-sm text-muted">No active spike alerts.</div>;
+    return <div className="px-1 py-6 text-center text-sm text-muted">{t("alerts.none")}</div>;
   }
   return (
     <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -25,18 +29,31 @@ export default function AlertsFeed({ items, limit }: { items: SpikeAlert[]; limi
                 <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${critical ? "bg-danger" : "bg-warning"}`} />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold text-white/90">{a.sub_head}</span>
+                {/* The sub-head IS the alert's subject — truncating it made
+                    three different "Online Financial …" alerts identical on a
+                    phone. Let it wrap and keep the ratio beside it. */}
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-sm font-semibold text-white/90">
+                    {d("crimeSubHead", a.sub_head)}
+                  </span>
                   <span className={`tabular inline-flex items-center gap-0.5 text-sm font-bold ${critical ? "text-danger" : "text-warning"}`}>
                     <TrendingUp size={13} /> {a.ratio}×
                   </span>
                 </div>
-                <div className="mt-0.5 text-xs text-muted">
-                  <span className="text-white/70">{a.district}</span> · {a.recent} in 30d vs{" "}
-                  <span className="tabular">{a.baseline}</span>/mo baseline
+                {/* One interpolated sentence rather than inline spans: the clause order
+                    differs in Kannada, so the numbers can't be positional fragments.
+                    tabular-nums (not the mono face) keeps the digits aligned without
+                    forcing Kannada text through JetBrains Mono. */}
+                <div className="mt-0.5 text-xs tabular-nums text-muted">
+                  <span className="text-white/70">{d("district", a.district)}</span>{" "}
+                  · {t("alerts.trendCompare", { recent: a.recent, baseline: a.baseline })}
                 </div>
               </div>
-              <Badge variant={critical ? "danger" : "warning"}>{a.severity}</Badge>
+              <span className="shrink-0">
+                <Badge variant={critical ? "danger" : "warning"}>
+                  {d("severity", a.severity)}
+                </Badge>
+              </span>
             </div>
           </li>
         );
@@ -46,9 +63,10 @@ export default function AlertsFeed({ items, limit }: { items: SpikeAlert[]; limi
 }
 
 export function AlertsEmpty() {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 text-sm text-success">
-      <AlertTriangle size={15} /> No active spikes — all categories within historical norms.
+      <AlertTriangle size={15} /> {t("alerts.allClear")}
     </div>
   );
 }

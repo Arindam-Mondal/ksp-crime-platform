@@ -3,6 +3,7 @@ import ForceGraph2D from "react-force-graph-2d";
 import { Maximize2, Plus, Minus, RefreshCw } from "lucide-react";
 import type { EgoNode, EgoEdge } from "../../lib/api";
 import { initials, tileColor } from "../../lib/avatar";
+import { useT } from "../../i18n";
 
 const EDGE_LO = [40, 52, 79]; // #28344f
 const EDGE_HI = [91, 127, 255]; // #5b7fff
@@ -30,6 +31,7 @@ export default function ForceGraph({
   nodeScale?: number;
   onNodeClick?: (id: string) => void;
 }) {
+  const t = useT();
   const fgRef = useRef<any>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
@@ -202,10 +204,10 @@ export default function ForceGraph({
       />
 
       <div className="absolute right-3 top-3 z-10 flex flex-col gap-1.5">
-        <CtrlBtn onClick={() => zoomBy(1.25)} label="Zoom in"><Plus size={15} /></CtrlBtn>
-        <CtrlBtn onClick={() => zoomBy(0.8)} label="Zoom out"><Minus size={15} /></CtrlBtn>
-        <CtrlBtn onClick={fit} label="Fit to view"><Maximize2 size={14} /></CtrlBtn>
-        <CtrlBtn onClick={reheat} label="Re-run layout"><RefreshCw size={14} /></CtrlBtn>
+        <CtrlBtn onClick={() => zoomBy(1.25)} label={t("graph.zoomIn")}><Plus size={15} /></CtrlBtn>
+        <CtrlBtn onClick={() => zoomBy(0.8)} label={t("graph.zoomOut")}><Minus size={15} /></CtrlBtn>
+        <CtrlBtn onClick={fit} label={t("graph.fit")}><Maximize2 size={14} /></CtrlBtn>
+        <CtrlBtn onClick={reheat} label={t("graph.relayout")}><RefreshCw size={14} /></CtrlBtn>
       </div>
     </div>
   );

@@ -28,21 +28,30 @@ def _top_offenders(case_ids: set[int] | None, limit: int = 8) -> list[dict]:
     return out[:limit]
 
 
-def build_report(scope: str = "state", subject_id: str | None = None) -> dict:
+def build_report(scope: str = "state", subject_id: str | None = None,
+                 lang: str = "en") -> dict:
+    """`lang` steers only the generated narrative and the *keys* the client uses to
+    label the briefing. Every aggregate below stays English-keyed — see the anomaly
+    templates in services/aggregations.py for the same reasoning."""
     cases_all = firdata.cases()
 
+    # `subject_kind` tells the client how to label `subject`: a district name is
+    # translatable, a person's name never is (see i18n/data.ts).
     if scope == "district" and subject_id:
         rows = [c for c in cases_all if c["district"] == subject_id]
         subject = subject_id
+        subject_kind = "district"
     elif scope == "person" and subject_id:
         g = firdata.offenders()["by_id"].get(subject_id)
         ids = set(g["case_ids"]) if g else set()
         rows = [c for c in cases_all if c["id"] in ids]
         subject = g["name"] if g else subject_id
+        subject_kind = "person"
     else:
         scope = "state"
         rows = cases_all
         subject = "Karnataka (State-wide)"
+        subject_kind = "state"
 
     total = len(rows)
     finals = [c for c in rows if c["cstype"]]
@@ -77,23 +86,26 @@ def build_report(scope: str = "state", subject_id: str | None = None) -> dict:
     context = [a["description"] for a in anoms[:3]] + (
         [f"{a['sub_head']} surging {a['ratio']}x in {a['district']}" for a in alerts[:3]]
     )
-    llm = get_llm().complete(prompt, context=context)
+    llm = get_llm().complete(prompt, context=context, lang=lang)
 
     return {
         "scope": scope,
         "subject": subject,
+        "subject_kind": subject_kind,
         "subject_id": subject_id,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "narrative": llm.text,
         "provider": llm.provider,
         "model": llm.model,
+        # `label` is the English rendering; `label_key` lets the client show the same
+        # KPI in the reader's language without the server holding a Kannada catalog.
         "kpis": [
-            {"label": "Registered cases", "value": f"{total:,}"},
-            {"label": "Chargesheet rate", "value": f"{cs_rate}%"},
-            {"label": "Heinous share", "value": f"{heinous}%"},
-            {"label": "Arrests", "value": f"{arrests:,}"},
-            {"label": "Districts", "value": str(len(districts))},
-            {"label": "Active alerts", "value": str(len(alerts))},
+            {"label_key": "report.kpi.registeredCases", "label": "Registered cases", "value": f"{total:,}"},
+            {"label_key": "report.kpi.chargesheetRate", "label": "Chargesheet rate", "value": f"{cs_rate}%"},
+            {"label_key": "report.kpi.heinousShare", "label": "Heinous share", "value": f"{heinous}%"},
+            {"label_key": "report.kpi.arrests", "label": "Arrests", "value": f"{arrests:,}"},
+            {"label_key": "report.kpi.districts", "label": "Districts", "value": str(len(districts))},
+            {"label_key": "report.kpi.activeAlerts", "label": "Active alerts", "value": str(len(alerts))},
         ],
         "hotspots": [
             {"district": d["district"], "cases": d["cases"], "risk_score": d["risk_score"]}

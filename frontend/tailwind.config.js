@@ -4,8 +4,18 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Manrope", "ui-sans-serif", "system-ui", "Segoe UI", "sans-serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+        // Noto Sans Kannada sits *after* Manrope on purpose: Manrope has no Kannada
+        // glyphs, so the browser falls through per-glyph — English keeps rendering in
+        // Manrope and Kannada runs pick up Noto, with no conditional font switching.
+        sans: [
+          "Manrope",
+          "Noto Sans Kannada",
+          "ui-sans-serif",
+          "system-ui",
+          "Segoe UI",
+          "sans-serif",
+        ],
+        mono: ["JetBrains Mono", "Noto Sans Kannada", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       colors: {
         // App surfaces — layered dark "command surface"
@@ -23,6 +33,15 @@ export default {
         ksp: { bg: "#0a0e17", panel: "#111726", accent: "#5b7fff", danger: "#ef4444" },
       },
       borderRadius: { xl: "0.75rem", "2xl": "1rem" },
+      // Semantic stacking order — always name the layer, never an arbitrary 999.
+      zIndex: {
+        base: "1",
+        overlay: "20", // in-panel overlays (map legends, loading veils)
+        sticky: "30", // mobile top bar
+        backdrop: "40",
+        drawer: "50",
+        tooltip: "60",
+      },
       boxShadow: {
         card: "0 1px 2px rgba(0,0,0,0.35), 0 8px 28px -14px rgba(0,0,0,0.55)",
         "card-hover": "0 2px 6px rgba(0,0,0,0.4), 0 18px 44px -18px rgba(0,0,0,0.65)",

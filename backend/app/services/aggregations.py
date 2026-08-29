@@ -194,6 +194,14 @@ def anomalies(cases: list[dict], top_n: int = 12) -> list[dict]:
                     "expected": round(mean, 1),
                     "z": round(z, 2),
                     "severity": "High" if z >= 3.2 else "Medium",
+                    # `description` is the English rendering and stays authoritative —
+                    # services/report.py feeds it to the LLM as grounding context, where
+                    # English is correct. `template`/`params` let the UI re-render the
+                    # same sentence in the reader's language without the language ever
+                    # becoming a cache key on this precomputed aggregate.
+                    "template": "anomaly.volume",
+                    "params": {"district": district, "n": n, "month": month,
+                               "z": f"{z:.1f}", "mean": f"{mean:.0f}"},
                     "description": f"{district} registered {n} cases in {month} — "
                                    f"{z:.1f}σ above its {mean:.0f}/month norm.",
                 })
@@ -218,6 +226,9 @@ def anomalies(cases: list[dict], top_n: int = 12) -> list[dict]:
                     "expected": round(total / 24, 1),
                     "z": round((p - 1 / 24) / (1 / 24), 2),
                     "severity": "Medium",
+                    "template": "anomaly.temporal",
+                    "params": {"n": n, "sub_head": sub, "hour": f"{hour:02d}:00",
+                               "pct": f"{p*100:.1f}"},
                     "description": f"{n} {sub} cases at {hour:02d}:00 — an unusual hour "
                                    f"for this crime ({p*100:.1f}% of its cases).",
                 })
@@ -278,6 +289,10 @@ def multivariate_anomalies(cases: list[dict], contamination: float = 0.08,
             "expected": None,
             "z": round(float(-score), 3),
             "severity": "High" if score <= cutoff else "Medium",
+            "template": "anomaly.multivariate",
+            "params": {"district": district, "month": month, "n": n,
+                       "heinous": f"{heinous_share*100:.0f}", "cs": f"{cs_rate*100:.0f}",
+                       "pendency": f"{pendency*100:.0f}"},
             "description": f"{district} in {month}: an unusual combination of volume "
                             f"({n}), heinous share ({heinous_share*100:.0f}%), chargesheet "
                             f"rate ({cs_rate*100:.0f}%) and pendency ({pendency*100:.0f}%) — "

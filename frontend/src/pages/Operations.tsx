@@ -18,6 +18,10 @@ import PageHeader from "../components/PageHeader";
 import StatCard from "../components/StatCard";
 import Badge from "../components/Badge";
 import { Skeleton, TableSkeleton } from "../components/Skeleton";
+import ChartFrame from "../components/charts/ChartFrame";
+import { truncatedTick, useCharsFor, catAxisWidth } from "../components/charts/AxisTick";
+import { useT } from "../i18n";
+import { useDataLabel } from "../i18n/data";
 import {
   CHART,
   tooltipStyle,
@@ -35,51 +39,71 @@ export default function Operations() {
 
   const a = arrests.data;
   const o = officers.data;
+  const t = useT();
+  const dl = useDataLabel();
+  const charsFor = useCharsFor();
+
+  // Crime-head axis labels translated in the data; counts and colours untouched.
+  const daysToArrest = (a?.days_to_arrest_by_head ?? []).map((r) => ({
+    ...r,
+    crime_head: dl("crimeHead", r.crime_head),
+  }));
+  const daysToChargesheet = (timing.data?.days_to_chargesheet ?? []).map((r) => ({
+    ...r,
+    crime_head: dl("crimeHead", r.crime_head),
+  }));
 
   return (
     <div className="space-y-7">
       <PageHeader
         icon={UserCog}
-        eyebrow="Investigation Operations"
-        title="Arrests, Officers & Courts"
-        subtitle="Process analytics from ArrestSurrender, Employee, ChargesheetDetails and Court"
+        eyebrow={t("operations.eyebrow")}
+        title={t("operations.title")}
+        subtitle={t("operations.subtitle")}
       />
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Arrest / surrender events"
-          value={a ? a.total.toLocaleString() : "—"}
+          label={t("operations.arrestEvents")}
+          value={a ? a.total.toLocaleString() : t("common.none")}
           icon={Lock}
           accent="warning"
-          caption={a ? `${a.arrests.toLocaleString()} arrests · ${a.surrenders.toLocaleString()} surrenders` : "Loading…"}
+          caption={
+            a
+              ? t("operations.arrestCaption", {
+                  arrests: a.arrests.toLocaleString(),
+                  surrenders: a.surrenders.toLocaleString(),
+                })
+              : t("common.loading")
+          }
         />
         <StatCard
-          label="Out-of-state arrests"
-          value={a ? a.out_of_state.toLocaleString() : "—"}
+          label={t("operations.outOfState")}
+          value={a ? a.out_of_state.toLocaleString() : t("common.none")}
           icon={Landmark}
           accent="info"
-          caption="Made outside Karnataka"
+          caption={t("operations.outOfStateCaption")}
         />
         <StatCard
-          label="Police strength"
-          value={o ? o.total_employees.toLocaleString() : "—"}
+          label={t("operations.strength")}
+          value={o ? o.total_employees.toLocaleString() : t("common.none")}
           icon={UserCog}
-          caption={o ? `${o.active_investigators} active investigators` : "Loading…"}
+          caption={o ? t("operations.strengthCaption", { count: o.active_investigators }) : t("common.loading")}
         />
         <StatCard
-          label="Courts in pipeline"
-          value={courts.data ? String(courts.data.total_courts) : "—"}
+          label={t("operations.courts")}
+          value={courts.data ? String(courts.data.total_courts) : t("common.none")}
           icon={Scale}
           accent="success"
-          caption="With at least one committed case"
+          caption={t("operations.courtsCaption")}
         />
       </div>
 
       {/* Arrest trend + days to arrest */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel icon={Lock} title="Arrest trend" subtitle="Monthly arrest & surrender events">
-          <div style={{ height: 260 }}>
+        <Panel icon={Lock} title={t("operations.arrestTrend")} subtitle={t("operations.arrestTrendSubtitle")}>
+          <div className="h-[230px] sm:h-[260px]">
             {arrests.isPending ? (
               <Skeleton className="h-full w-full" />
             ) : (
@@ -102,32 +126,41 @@ export default function Operations() {
           </div>
         </Panel>
 
-        <Panel icon={Timer} title="Median days to first arrest" subtitle="From FIR registration, by crime head">
-          <div style={{ height: 260 }}>
-            {arrests.isPending ? (
-              <Skeleton className="h-full w-full" />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={a?.days_to_arrest_by_head ?? []} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
-                  <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} unit="d" />
-                  <YAxis type="category" dataKey="crime_head" tick={{ ...CHART.axisTick, fontSize: 10 }} tickLine={false} axisLine={false} width={168} />
-                  <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} formatter={(v: any) => [`${v} days`, "median"]} />
-                  <Bar dataKey="median_days_to_arrest" radius={[0, 4, 4, 0]} maxBarSize={16}>
-                    {(a?.days_to_arrest_by_head ?? []).map((_, i) => (
-                      <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+        <Panel icon={Timer} title={t("operations.daysToArrest")} subtitle={t("operations.daysToArrestSubtitle")}>
+          <ChartFrame className="h-[230px] sm:h-[260px]">
+            {(w) =>
+              arrests.isPending ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={daysToArrest} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
+                    <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} unit="d" />
+                    <YAxis
+                      type="category"
+                      dataKey="crime_head"
+                      tick={truncatedTick(charsFor(catAxisWidth(w) - 8, 10), { fontSize: 10 })}
+                      tickLine={false}
+                      axisLine={false}
+                      width={catAxisWidth(w)}
+                    />
+                    <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} formatter={(v: any) => [t("operations.daysTooltip", { days: v }), t("operations.medianLabel")]} />
+                    <Bar dataKey="median_days_to_arrest" radius={[0, 4, 4, 0]} maxBarSize={16}>
+                      {daysToArrest.map((_, i) => (
+                        <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            }
+          </ChartFrame>
         </Panel>
       </div>
 
       {/* Officer workload */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Panel icon={UserCog} title="Force composition" subtitle="Employees by rank">
+        <Panel icon={UserCog} title={t("operations.forceComposition")} subtitle={t("operations.forceCompositionSubtitle")}>
           {officers.isPending ? (
             <Skeleton className="h-[300px] w-full" />
           ) : (
@@ -137,7 +170,7 @@ export default function Operations() {
                 return (
                   <li key={r.rank}>
                     <div className="mb-0.5 flex items-baseline justify-between text-xs">
-                      <span className="text-white/85">{r.rank}</span>
+                      <span className="text-white/85">{dl("rank", r.rank)}</span>
                       <span className="tabular text-muted">{r.count}</span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-bg/80">
@@ -153,29 +186,29 @@ export default function Operations() {
         <div className="xl:col-span-2">
           <Panel
             icon={UserCog}
-            title="Top investigating officers"
-            subtitle="Chargesheets filed & arrests made (Employee ⋈ ChargesheetDetails ⋈ ArrestSurrender)"
+            title={t("operations.topOfficers")}
+            subtitle={t("operations.topOfficersSubtitle")}
           >
             {officers.isPending ? (
               <TableSkeleton rows={8} />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="table-scroll">
+                <table className="w-full min-w-[720px] text-sm">
                   <thead>
                     <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
-                      <th className="py-2.5 pr-4">Officer</th>
-                      <th className="py-2.5 pr-4">Rank</th>
-                      <th className="py-2.5 pr-4">Station</th>
-                      <th className="py-2.5 pr-4">Chargesheets</th>
-                      <th className="py-2.5 pr-4">Arrests</th>
-                      <th className="py-2.5">CS success</th>
+                      <th className="py-2.5 pr-4">{t("operations.col.officer")}</th>
+                      <th className="py-2.5 pr-4">{t("operations.col.rank")}</th>
+                      <th className="py-2.5 pr-4">{t("operations.col.station")}</th>
+                      <th className="py-2.5 pr-4">{t("operations.col.chargesheets")}</th>
+                      <th className="py-2.5 pr-4">{t("operations.col.arrests")}</th>
+                      <th className="py-2.5">{t("operations.col.csSuccess")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(o?.top ?? []).map((r) => (
                       <tr key={r.employee_id} className="border-b border-line/60 transition-colors hover:bg-white/[0.025]">
                         <td className="py-2.5 pr-4 font-medium text-white/90">{r.name}</td>
-                        <td className="py-2.5 pr-4 text-white/70">{r.rank}</td>
+                        <td className="py-2.5 pr-4 text-white/70">{dl("rank", r.rank)}</td>
                         <td className="py-2.5 pr-4 text-xs text-muted">{r.station}</td>
                         <td className="tabular py-2.5 pr-4 text-white/70">{r.chargesheets}</td>
                         <td className="tabular py-2.5 pr-4 text-white/70">{r.arrests}</td>
@@ -196,19 +229,19 @@ export default function Operations() {
 
       {/* Court caseload + days to chargesheet */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel icon={Scale} title="Court caseload" subtitle="Cases committed to trial, per court">
+        <Panel icon={Scale} title={t("operations.courtCaseload")} subtitle={t("operations.courtCaseloadSubtitle")}>
           {courts.isPending ? (
             <TableSkeleton rows={8} />
           ) : (
             <div className="max-h-[380px] overflow-auto pr-1">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead className="sticky top-0 bg-surface">
                   <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
-                    <th className="py-2.5 pr-4">Court</th>
-                    <th className="py-2.5 pr-4">Cases</th>
-                    <th className="py-2.5 pr-4">Pending</th>
-                    <th className="py-2.5 pr-4">Convicted</th>
-                    <th className="py-2.5">Acquitted</th>
+                    <th className="py-2.5 pr-4">{t("operations.col.court")}</th>
+                    <th className="py-2.5 pr-4">{t("operations.col.cases")}</th>
+                    <th className="py-2.5 pr-4">{t("operations.col.pending")}</th>
+                    <th className="py-2.5 pr-4">{t("operations.col.convicted")}</th>
+                    <th className="py-2.5">{t("operations.col.acquitted")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -227,22 +260,31 @@ export default function Operations() {
           )}
         </Panel>
 
-        <Panel icon={Building2} title="Median days to chargesheet" subtitle="From registration to A-type final report, by crime head">
-          <div style={{ height: 340 }}>
-            {timing.isPending ? (
-              <Skeleton className="h-full w-full" />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={timing.data?.days_to_chargesheet ?? []} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
-                  <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} unit="d" />
-                  <YAxis type="category" dataKey="crime_head" tick={{ ...CHART.axisTick, fontSize: 10 }} tickLine={false} axisLine={false} width={168} />
-                  <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} formatter={(v: any) => [`${v} days`, "median"]} />
-                  <Bar dataKey="median_days" radius={[0, 4, 4, 0]} maxBarSize={16} fill="#a78bfa" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+        <Panel icon={Building2} title={t("operations.daysToChargesheet")} subtitle={t("operations.daysToChargesheetSubtitle")}>
+          <ChartFrame className="h-[280px] sm:h-[340px]">
+            {(w) =>
+              timing.isPending ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={daysToChargesheet} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
+                    <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} unit="d" />
+                    <YAxis
+                      type="category"
+                      dataKey="crime_head"
+                      tick={truncatedTick(charsFor(catAxisWidth(w) - 8, 10), { fontSize: 10 })}
+                      tickLine={false}
+                      axisLine={false}
+                      width={catAxisWidth(w)}
+                    />
+                    <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} formatter={(v: any) => [t("operations.daysTooltip", { days: v }), t("operations.medianLabel")]} />
+                    <Bar dataKey="median_days" radius={[0, 4, 4, 0]} maxBarSize={16} fill="#a78bfa" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            }
+          </ChartFrame>
         </Panel>
       </div>
     </div>
