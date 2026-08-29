@@ -25,23 +25,53 @@ class LLMResult:
     grounded_on: list[str]  # ids/snippets the answer was grounded on (RAG)
 
 
+# Karnataka State Police officers work in Kannada. Generation is the *only* place the
+# reader's language crosses the API boundary: it changes the produced text, and these
+# endpoints are uncached, so unlike the precomputed aggregates there is no cache to fork.
+# Kept to one short sentence — every token here is billed on every call (budget guardrail).
+_LANG_DIRECTIVE = {
+    "kn": (
+        " Reply in Kannada (ಕನ್ನಡ). Keep person names, FIR/crime numbers and Act-Section "
+        "citations in English, and use Western numerals."
+    ),
+}
+
+
+def _system_prompt(lang: str) -> str:
+    base = (
+        "You are a crime-intelligence analyst for the Karnataka State Police. "
+        "Answer concisely and only from the provided context."
+    )
+    return base + _LANG_DIRECTIVE.get(lang, "")
+
+
 class LLMProvider:
-    def complete(self, prompt: str, context: list[str] | None = None) -> LLMResult:  # pragma: no cover
+    def complete(self, prompt: str, context: list[str] | None = None,
+                 lang: str = "en") -> LLMResult:  # pragma: no cover
         raise NotImplementedError
 
 
 class MockProvider(LLMProvider):
     """No-cost stand-in so the app is fully runnable without QuickML access."""
 
-    def complete(self, prompt: str, context: list[str] | None = None) -> LLMResult:
+    def complete(self, prompt: str, context: list[str] | None = None,
+                 lang: str = "en") -> LLMResult:
         ctx = context or []
         preview = "; ".join(ctx[:3])
-        text = (
-            "[mock LLM] This is a placeholder answer. With QuickML enabled, the model "
-            "would answer the question grounded on the retrieved records. "
-            f"Question: {prompt.strip()[:160]} "
-            + (f"| Grounded on: {preview}" if preview else "")
-        )
+        if lang == "kn":
+            text = (
+                "[mock LLM] ಇದು ತಾತ್ಕಾಲಿಕ ಉತ್ತರ. QuickML ಸಕ್ರಿಯಗೊಳಿಸಿದಾಗ, ಮಾದರಿಯು "
+                "ಪಡೆದ ದಾಖಲೆಗಳ ಆಧಾರದ ಮೇಲೆ ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರಿಸುತ್ತದೆ. "
+                f"ಪ್ರಶ್ನೆ: {prompt.strip()[:160]} "
+                + (f"| ಆಧಾರ: {preview}" if preview else "")
+            )
+        else:
+            text = (
+                "[mock LLM] This is a placeholder answer. With QuickML enabled, the model "
+                "would answer the question grounded on the retrieved records. "
+                f"Question: {prompt.strip()[:160]} "
+                + (f"| Grounded on: {preview}" if preview else "")
+            )
         return LLMResult(text=text, provider="mock", model="mock", grounded_on=ctx[:5])
 
 
@@ -119,21 +149,22 @@ class QuickMLProvider(LLMProvider):
         self._cached_token_expiry = time.time() + data.get("expires_in", 3600) - 60
         return self._cached_token
 
-    def complete(self, prompt: str, context: list[str] | None = None) -> LLMResult:
+    def complete(self, prompt: str, context: list[str] | None = None,
+                 lang: str = "en") -> LLMResult:
         """POST to a Catalyst QuickML LLM Serving endpoint (RAG-grounded on context
         we retrieve ourselves from the FIR case view — see services/mo.py / assistant
         router — rather than QuickML's own Knowledge Base, since that's a static
         document-upload store and our case data is live/queryable already).
+
+        `lang` steers the output language only — the retrieved context stays English,
+        since that is what the aggregates and FIR narratives hold.
 
         Not runnable locally — use LLM_PROVIDER=mock for dev."""
         import httpx
 
         ctx = context or []
         grounding = "\n".join(f"- {c}" for c in ctx[:5])
-        system = (
-            "You are a crime-intelligence analyst for the Karnataka State Police. "
-            "Answer concisely and only from the provided context."
-        )
+        system = _system_prompt(lang)
         user = prompt if not grounding else f"{prompt}\n\nContext:\n{grounding}"
         payload = {
             "model": self.model,

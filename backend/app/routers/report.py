@@ -18,8 +18,9 @@ router = APIRouter(prefix="/api/report", tags=["report"])
 class ReportRequest(BaseModel):
     scope: str = "state"  # state | district | person
     id: str | None = None
+    lang: str = "en"  # narrative output language; aggregates stay English-keyed
 
 
 @router.post("")
 def generate(req: ReportRequest):
-    return report_service.build_report(scope=req.scope, subject_id=req.id)
+    return report_service.build_report(scope=req.scope, subject_id=req.id, lang=req.lang)

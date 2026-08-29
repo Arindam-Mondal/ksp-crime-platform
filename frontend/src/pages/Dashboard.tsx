@@ -10,7 +10,6 @@ import {
   Cell,
   AreaChart,
   Area,
-  Legend,
 } from "recharts";
 import {
   Activity,
@@ -39,6 +38,11 @@ import AlertsFeed from "../components/AlertsFeed";
 import Badge from "../components/Badge";
 import { ChartSkeleton, Skeleton } from "../components/Skeleton";
 import DonutChart from "../components/charts/DonutChart";
+import ChartFrame from "../components/charts/ChartFrame";
+import ChartLegend from "../components/charts/ChartLegend";
+import { truncatedTick, useCharsFor, catAxisWidth } from "../components/charts/AxisTick";
+import { useT } from "../i18n";
+import { useDataLabel } from "../i18n/data";
 import {
   CHART,
   tooltipStyle,
@@ -69,30 +73,44 @@ export default function Dashboard() {
   const spikes = useQuery({ queryKey: ["spikes"], queryFn: api.spikes });
 
   const s = summary.data;
-  const topDistricts = (byDistrict.data?.items ?? []).slice(0, 12);
-  const subHeads = (bySubHead.data?.items ?? []).slice(0, 14);
+  const t = useT();
+  const d = useDataLabel();
+  const charsFor = useCharsFor();
+
+  // Category-axis labels are translated in the data; the counts and colour lookups
+  // below still key off the untouched English fields (`crime_head`).
+  const topDistricts = (byDistrict.data?.items ?? [])
+    .slice(0, 12)
+    .map((x) => ({ ...x, district: d("district", x.district) }));
+  const subHeads = (bySubHead.data?.items ?? [])
+    .slice(0, 14)
+    .map((x) => ({ ...x, sub_head: d("crimeSubHead", x.sub_head) }));
   const stages = funnel.data?.stages ?? [];
   const maxStage = stages.reduce((m, x) => Math.max(m, x.count), 1);
+
+  const headLegend = Object.entries(HEAD_COLORS)
+    .filter(([k]) => k !== "Other" && k !== "Others")
+    .map(([head, color]) => ({ label: d("crimeHead", head), color }));
 
   return (
     <div className="space-y-7">
       <PageHeader
         icon={Activity}
-        eyebrow="Command Overview"
-        title="Strategic Intelligence Hub"
-        subtitle="Live operational picture over the Police FIR System — CaseMaster and linked ERD tables"
+        eyebrow={t("dashboard.eyebrow")}
+        title={t("dashboard.title")}
+        subtitle={t("dashboard.subtitle")}
       />
 
       {/* Emerging-trend spike alerts */}
       <Panel
         icon={Siren}
-        title="Active spike alerts"
-        subtitle="Crime sub-heads surging above their historical baseline"
+        title={t("dashboard.spikes")}
+        subtitle={t("dashboard.spikesSubtitle")}
         actions={
           spikes.data ? (
             <Link to="/hotspots">
               <Badge variant={spikes.data.count ? "danger" : "success"} dot>
-                {spikes.data.count} active
+                {t("dashboard.spikesActive", { count: spikes.data.count })}
               </Badge>
             </Link>
           ) : undefined
@@ -109,73 +127,93 @@ export default function Dashboard() {
       </Panel>
 
       {/* KPI rows */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Registered cases"
-          value={s ? s.total_cases.toLocaleString() : "—"}
+          label={t("dashboard.registeredCases")}
+          value={s ? s.total_cases.toLocaleString() : t("common.none")}
           icon={Layers}
-          caption={s ? `${s.fir_cases.toLocaleString()} FIRs · ${s.districts} districts · ${s.police_stations} stations` : "Loading…"}
+          caption={
+            s
+              ? t("dashboard.registeredCaption", {
+                  firs: s.fir_cases.toLocaleString(),
+                  districts: s.districts,
+                  stations: s.police_stations,
+                })
+              : t("common.loading")
+          }
         />
         <StatCard
-          label="Chargesheet rate"
-          value={s ? `${s.chargesheet_rate}%` : "—"}
+          label={t("dashboard.chargesheetRate")}
+          value={s ? `${s.chargesheet_rate}%` : t("common.none")}
           icon={Gavel}
           accent="success"
-          caption="A-type final reports"
-          delta={s ? { value: `${s.conviction_rate}% convicted`, direction: "up", tone: "good" } : undefined}
+          caption={t("dashboard.chargesheetCaption")}
+          delta={
+            s
+              ? {
+                  value: t("dashboard.convictedDelta", { rate: s.conviction_rate }),
+                  direction: "up",
+                  tone: "good",
+                }
+              : undefined
+          }
         />
         <StatCard
-          label="Cyber-crime share"
-          value={s ? `${s.cyber_share}%` : "—"}
+          label={t("dashboard.cyberShare")}
+          value={s ? `${s.cyber_share}%` : t("common.none")}
           icon={Wifi}
           accent="info"
-          caption="Of all registered cases"
-          delta={s ? { value: "rising", direction: "up", tone: "bad" } : undefined}
+          caption={t("dashboard.ofAllCases")}
+          delta={s ? { value: t("dashboard.rising"), direction: "up", tone: "bad" } : undefined}
         />
         <StatCard
-          label="Top hotspot"
-          value={s?.top_district ?? "—"}
+          label={t("dashboard.topHotspot")}
+          value={s ? d("district", s.top_district) : t("common.none")}
           icon={Crosshair}
           accent="danger"
-          caption={s ? `${s.top_district_count.toLocaleString()} cases` : "Loading…"}
+          caption={
+            s
+              ? t("dashboard.caseCount", { count: s.top_district_count.toLocaleString() })
+              : t("common.loading")
+          }
         />
       </div>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Heinous offences"
-          value={s ? `${s.heinous_share}%` : "—"}
+          label={t("dashboard.heinous")}
+          value={s ? `${s.heinous_share}%` : t("common.none")}
           icon={Scale}
           accent="danger"
-          caption="GravityOffence = Heinous"
+          caption={t("dashboard.heinousCaption")}
         />
         <StatCard
-          label="Arrests & surrenders"
-          value={s ? s.arrests_total.toLocaleString() : "—"}
+          label={t("dashboard.arrests")}
+          value={s ? s.arrests_total.toLocaleString() : t("common.none")}
           icon={Lock}
           accent="warning"
-          caption="ArrestSurrender events"
+          caption={t("dashboard.arrestsCaption")}
         />
         <StatCard
-          label="Investigation pendency"
-          value={s ? `${s.pendency_rate}%` : "—"}
+          label={t("dashboard.pendency")}
+          value={s ? `${s.pendency_rate}%` : t("common.none")}
           icon={Hourglass}
           accent="warning"
-          caption={s ? `median ${s.median_days_to_chargesheet}d to chargesheet` : undefined}
+          caption={s ? t("dashboard.pendencyCaption", { days: s.median_days_to_chargesheet }) : undefined}
         />
         <StatCard
-          label="Repeat offenders"
-          value={s ? s.repeat_offenders.toLocaleString() : "—"}
+          label={t("dashboard.repeatOffenders")}
+          value={s ? s.repeat_offenders.toLocaleString() : t("common.none")}
           icon={Users}
           accent="info"
-          caption="Accused linked to 2+ FIRs"
+          caption={t("dashboard.repeatOffendersCaption")}
         />
       </div>
 
       {/* Monthly trend by crime head */}
-      <Panel icon={TrendingUp} title="Case trend" subtitle="Monthly registrations by crime head — note the rising cyber-crime band">
-        <div style={{ height: 300 }}>
+      <Panel icon={TrendingUp} title={t("dashboard.trend")} subtitle={t("dashboard.trendSubtitle")}>
+        <div className="h-[240px] sm:h-[280px] lg:h-[300px]">
           {byMonth.isPending ? (
-            <ChartSkeleton height={300} />
+            <ChartSkeleton />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={byMonth.data?.items ?? []} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
@@ -191,12 +229,14 @@ export default function Dashboard() {
                 <XAxis dataKey="month" tick={CHART.axisTick} tickLine={false} axisLine={{ stroke: CHART.grid }} minTickGap={24} />
                 <YAxis tick={CHART.axisTick} tickLine={false} axisLine={false} width={40} />
                 <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
-                <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
                 {(byMonth.data?.heads ?? []).map((h) => (
+                  // `dataKey` must stay the English head — it indexes into each month
+                  // row and feeds gradId(). `name` is what the tooltip prints.
                   <Area
                     key={h}
                     type="monotone"
                     dataKey={h}
+                    name={d("crimeHead", h)}
                     stackId="1"
                     stroke={HEAD_COLORS[h] ?? CHART.accent}
                     strokeWidth={2}
@@ -207,14 +247,20 @@ export default function Dashboard() {
             </ResponsiveContainer>
           )}
         </div>
+        <ChartLegend
+          items={(byMonth.data?.heads ?? []).map((h) => ({
+            label: d("crimeHead", h),
+            color: HEAD_COLORS[h] ?? CHART.accent,
+          }))}
+        />
       </Panel>
 
       {/* Investigation funnel + top sections */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Panel
           icon={Filter}
-          title="Investigation funnel"
-          subtitle="Registration → final report → chargesheet → trial → conviction"
+          title={t("dashboard.funnel")}
+          subtitle={t("dashboard.funnelSubtitle")}
         >
           {funnel.isPending ? (
             <Skeleton className="h-[300px] w-full" />
@@ -223,7 +269,7 @@ export default function Dashboard() {
               {stages.map((st, i) => (
                 <div key={st.stage}>
                   <div className="mb-1 flex items-baseline justify-between text-xs">
-                    <span className="font-medium text-white/85">{st.stage}</span>
+                    <span className="font-medium text-white/85">{d("funnelStage", st.stage)}</span>
                     <span className="tabular text-muted">
                       {st.count.toLocaleString()}
                       {i > 0 && maxStage ? ` · ${Math.round((st.count / maxStage) * 100)}%` : ""}
@@ -240,7 +286,7 @@ export default function Dashboard() {
               <div className="mt-4 flex flex-wrap gap-1.5 border-t border-line pt-3">
                 {(funnel.data?.leakage ?? []).map((l) => (
                   <Badge key={l.label} variant="neutral">
-                    {l.label} · {l.count.toLocaleString()}
+                    {d("funnelLeakage", l.label)} · {l.count.toLocaleString()}
                   </Badge>
                 ))}
               </div>
@@ -250,166 +296,230 @@ export default function Dashboard() {
 
         <Panel
           icon={BookOpenText}
-          title="Most-invoked act & sections"
-          subtitle="From ActSectionAssociation across all FIRs"
+          title={t("dashboard.sections")}
+          subtitle={t("dashboard.sectionsSubtitle")}
         >
-          <div style={{ height: 320 }}>
-            {topSections.isPending ? (
-              <ChartSkeleton height={320} />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={(topSections.data?.items ?? []).slice(0, 12)}
-                  layout="vertical"
-                  margin={{ left: 8, right: 16, top: 4, bottom: 4 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
-                  <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
-                  <YAxis
-                    type="category"
-                    dataKey="label"
-                    tick={{ ...CHART.axisTick, fontSize: 10 }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={92}
-                  />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    labelStyle={tooltipLabelStyle}
-                    itemStyle={tooltipItemStyle}
-                    cursor={cursorFill}
-                    formatter={(v: any, _n: any, p: any) => [`${v} — ${p?.payload?.description ?? ""}`, "cases"]}
-                  />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={16} fill={CHART.accent} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+          <ChartFrame className="h-[280px] sm:h-[320px]">
+            {(w) =>
+              topSections.isPending ? (
+                <ChartSkeleton />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={(topSections.data?.items ?? []).slice(0, 12)}
+                    layout="vertical"
+                    margin={{ left: 8, right: 16, top: 4, bottom: 4 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
+                    <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
+                    <YAxis
+                      type="category"
+                      dataKey="label"
+                      tick={truncatedTick(charsFor(catAxisWidth(w) - 8, 10), { fontSize: 10 })}
+                      tickLine={false}
+                      axisLine={false}
+                      width={catAxisWidth(w)}
+                    />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      labelStyle={tooltipLabelStyle}
+                      itemStyle={tooltipItemStyle}
+                      cursor={cursorFill}
+                      // Act/Section labels ("IPC 302") and the statutory description
+                      // stay English in both languages — that is how they are cited.
+                      formatter={(v: any, _n: any, p: any) => [
+                        `${v} — ${p?.payload?.description ?? ""}`,
+                        t("dashboard.sectionsTooltipLabel"),
+                      ]}
+                    />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={16} fill={CHART.accent} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            }
+          </ChartFrame>
         </Panel>
       </div>
 
       {/* District + sub-head breakdowns */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel icon={BarChart3} title="Cases by district" subtitle="Top 12 jurisdictions by volume">
-          <div style={{ height: 360 }}>
-            {byDistrict.isPending ? (
-              <ChartSkeleton height={360} />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topDistricts} margin={{ left: 4, right: 8, top: 8, bottom: 64 }}>
-                  <defs>
-                    <linearGradient id={CHART.gradientId} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={CHART.accentSoft} stopOpacity={0.95} />
-                      <stop offset="100%" stopColor={CHART.accent} stopOpacity={0.35} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
-                  <XAxis dataKey="district" angle={-40} textAnchor="end" interval={0} tick={CHART.axisTick} tickLine={false} axisLine={{ stroke: CHART.grid }} />
-                  <YAxis tick={CHART.axisTick} tickLine={false} axisLine={false} width={40} />
-                  <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
-                  <Bar dataKey="cases" radius={[5, 5, 0, 0]} maxBarSize={40}>
-                    {topDistricts.map((_, i) => (
-                      <Cell key={i} fill={`url(#${CHART.gradientId})`} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+        <Panel icon={BarChart3} title={t("dashboard.byDistrict")} subtitle={t("dashboard.byDistrictSubtitle")}>
+          <ChartFrame className="h-[300px] sm:h-[340px] lg:h-[360px]">
+            {(w) => {
+              if (byDistrict.isPending) return <ChartSkeleton />;
+              // Rotated labels need horizontal room per band. Below this the
+              // bars are so narrow that even truncated names collide, so the
+              // chart turns on its side and the names read left-aligned.
+              const horizontal = w > 0 && w < 560;
+              const bars = horizontal ? topDistricts.slice(0, 8) : topDistricts;
+              const gradient = (
+                <defs>
+                  <linearGradient
+                    id={CHART.gradientId}
+                    x1="0"
+                    y1="0"
+                    x2={horizontal ? "1" : "0"}
+                    y2={horizontal ? "0" : "1"}
+                  >
+                    <stop offset="0%" stopColor={CHART.accentSoft} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={CHART.accent} stopOpacity={0.35} />
+                  </linearGradient>
+                </defs>
+              );
+
+              return (
+                <ResponsiveContainer width="100%" height="100%">
+                  {horizontal ? (
+                    <BarChart data={bars} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                      {gradient}
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
+                      <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
+                      <YAxis
+                        type="category"
+                        dataKey="district"
+                        tick={truncatedTick(charsFor(catAxisWidth(w) - 8, 10), { fontSize: 10 })}
+                        tickLine={false}
+                        axisLine={false}
+                        width={catAxisWidth(w)}
+                      />
+                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
+                      <Bar dataKey="cases" radius={[0, 4, 4, 0]} maxBarSize={18}>
+                        {bars.map((_, i) => (
+                          <Cell key={i} fill={`url(#${CHART.gradientId})`} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  ) : (
+                    <BarChart data={bars} margin={{ left: 4, right: 8, top: 8, bottom: 72 }}>
+                      {gradient}
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
+                      <XAxis
+                        dataKey="district"
+                        interval={0}
+                        height={72}
+                        tickLine={false}
+                        axisLine={{ stroke: CHART.grid }}
+                        tick={truncatedTick(12, { angle: -40, fontSize: 11 })}
+                      />
+                      <YAxis tick={CHART.axisTick} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
+                      <Bar dataKey="cases" radius={[5, 5, 0, 0]} maxBarSize={40}>
+                        {bars.map((_, i) => (
+                          <Cell key={i} fill={`url(#${CHART.gradientId})`} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  )}
+                </ResponsiveContainer>
+              );
+            }}
+          </ChartFrame>
         </Panel>
 
-        <Panel icon={ListChecks} title="Crime sub-head breakdown" subtitle="Ranked, colored by parent crime head">
-          <div style={{ height: 360 }}>
-            {bySubHead.isPending ? (
-              <ChartSkeleton height={360} />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={subHeads} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
-                  <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
-                  <YAxis
-                    type="category"
-                    dataKey="sub_head"
-                    tick={{ ...CHART.axisTick, fontSize: 10 }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={148}
-                  />
-                  <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={18}>
-                    {subHeads.map((c, i) => (
-                      <Cell key={i} fill={HEAD_COLORS[c.crime_head] ?? CHART.accent} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-            {Object.entries(HEAD_COLORS)
-              .filter(([k]) => k !== "Other" && k !== "Others")
-              .map(([head, color]) => (
-                <span key={head} className="flex items-center gap-1.5 text-[11px] text-muted">
-                  <span className="h-2 w-2 rounded-sm" style={{ background: color }} />
-                  {head}
-                </span>
-              ))}
-          </div>
+        <Panel icon={ListChecks} title={t("dashboard.bySubHead")} subtitle={t("dashboard.bySubHeadSubtitle")}>
+          <ChartFrame className="h-[300px] sm:h-[340px] lg:h-[360px]">
+            {(w) =>
+              bySubHead.isPending ? (
+                <ChartSkeleton />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={subHeads} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
+                    <XAxis type="number" tick={CHART.axisTick} tickLine={false} axisLine={false} />
+                    <YAxis
+                      type="category"
+                      dataKey="sub_head"
+                      tick={truncatedTick(charsFor(catAxisWidth(w) - 8, 10), { fontSize: 10 })}
+                      tickLine={false}
+                      axisLine={false}
+                      width={catAxisWidth(w)}
+                    />
+                    <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorFill} />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={18}>
+                      {subHeads.map((c, i) => (
+                        <Cell key={i} fill={HEAD_COLORS[c.crime_head] ?? CHART.accent} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            }
+          </ChartFrame>
+          <ChartLegend items={headLegend} />
         </Panel>
       </div>
 
-      {/* Status + composition donuts */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Panel icon={PieIcon} title="Case status" subtitle="CaseStatusMaster pipeline">
+      {/* Status + composition donuts — 3-up only at 2xl, where each panel is
+          still wide enough for a ring plus a readable legend beside it */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 2xl:grid-cols-3">
+        {/* Each donut keeps the English value as `name` so the *_COLORS lookups still
+            resolve, and paints `label`. */}
+        <Panel icon={PieIcon} title={t("dashboard.caseStatus")} subtitle={t("dashboard.caseStatusSubtitle")}>
           {byStatus.isPending ? (
             <Skeleton className="h-[220px] w-full" />
           ) : (
             <DonutChart
-              data={(byStatus.data?.items ?? []).map((i) => ({ name: i.status, value: i.count }))}
+              data={(byStatus.data?.items ?? []).map((i) => ({
+                name: i.status,
+                label: d("caseStatus", i.status),
+                value: i.count,
+              }))}
               colors={(n) => STATUS_COLORS[n] ?? CHART.accent}
               centerValue={`${byStatus.data?.chargesheet_rate ?? 0}%`}
-              centerLabel="chargesheeted"
+              centerLabel={t("dashboard.chargesheetedCenter")}
             />
           )}
         </Panel>
 
-        <Panel icon={PieIcon} title="Case category" subtitle="FIR · Zero FIR · UDR · PAR">
+        <Panel icon={PieIcon} title={t("dashboard.caseCategory")} subtitle={t("dashboard.caseCategorySubtitle")}>
           {byCategory.isPending ? (
             <Skeleton className="h-[220px] w-full" />
           ) : (
             <DonutChart
-              data={(byCategory.data?.items ?? []).map((i) => ({ name: i.category, value: i.count }))}
+              data={(byCategory.data?.items ?? []).map((i) => ({
+                name: i.category,
+                label: d("category", i.category),
+                value: i.count,
+              }))}
               colors={(n) => CATEGORY_COLORS[n] ?? CHART.accent}
               centerValue={s ? s.total_cases.toLocaleString() : ""}
-              centerLabel="cases"
+              centerLabel={t("dashboard.casesCenter")}
             />
           )}
         </Panel>
 
-        <Panel icon={PieIcon} title="Offence gravity" subtitle="Heinous vs non-heinous">
+        <Panel icon={PieIcon} title={t("dashboard.gravity")} subtitle={t("dashboard.gravitySubtitle")}>
           {byGravity.isPending ? (
             <Skeleton className="h-[220px] w-full" />
           ) : (
             <DonutChart
-              data={(byGravity.data?.items ?? []).map((i) => ({ name: i.gravity, value: i.count }))}
+              data={(byGravity.data?.items ?? []).map((i) => ({
+                name: i.gravity,
+                label: d("gravity", i.gravity),
+                value: i.count,
+              }))}
               colors={(n) => GRAVITY_COLORS[n] ?? CHART.accent}
               centerValue={s ? `${s.heinous_share}%` : ""}
-              centerLabel="heinous"
+              centerLabel={t("dashboard.heinousCenter")}
             />
           )}
         </Panel>
       </div>
 
       {/* Crime head composition */}
-      <Panel icon={PieIcon} title="Crime composition" subtitle="Share by ERD crime head (CrimeHead master)">
+      <Panel icon={PieIcon} title={t("dashboard.composition")} subtitle={t("dashboard.compositionSubtitle")}>
         {byCrimeHead.isPending ? (
           <Skeleton className="h-[220px] w-full" />
         ) : (
           <DonutChart
-            data={(byCrimeHead.data?.items ?? []).map((i) => ({ name: i.crime_head, value: i.count }))}
+            data={(byCrimeHead.data?.items ?? []).map((i) => ({
+              name: i.crime_head,
+              label: d("crimeHead", i.crime_head),
+              value: i.count,
+            }))}
             colors={(n) => HEAD_COLORS[n] ?? CHART.accent}
             centerValue={s ? s.total_cases.toLocaleString() : ""}
-            centerLabel="cases"
+            centerLabel={t("dashboard.casesCenter")}
           />
         )}
       </Panel>

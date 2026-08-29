@@ -194,12 +194,23 @@ export interface SpikeAlert {
 export interface Anomaly {
   kind: string; subject: string; period: string; observed: number;
   expected: number; z: number; severity: string; description: string;
+  /**
+   * Catalog key + values for rendering `description` in the active language. Optional
+   * so an older/leaner backend response still renders — the UI falls back to the
+   * English `description`, which stays authoritative for LLM grounding either way.
+   */
+  template?: string;
+  params?: Record<string, string | number>;
 }
 
 // --- AI intelligence report ---
-export interface ReportKpi { label: string; value: string }
+/** `label` is the English rendering; `label_key` (optional, for older responses) is the
+ *  catalog key so the KPI can be shown in the reader's language. */
+export interface ReportKpi { label: string; label_key?: string; value: string }
 export interface IntelReport {
   scope: string; subject: string; subject_id: string | null; generated_at: string;
+  /** How to label `subject`: a district name translates, a person's name never does. */
+  subject_kind?: "district" | "person" | "state";
   narrative: string; provider: string; model: string;
   kpis: ReportKpi[];
   hotspots: { district: string; cases: number; risk_score: number }[];
@@ -256,7 +267,11 @@ export const api = {
   anomalies: () => get<{ method: string; count: number; items: Anomaly[] }>("/api/predictive/anomalies"),
   spikes: () => get<{ count: number; items: SpikeAlert[] }>("/api/alerts/spikes"),
 
-  // NL query + report
-  ask: (question: string) => post<AskResponse>("/api/assistant/ask", { question }),
-  report: (scope: string, id?: string) => post<IntelReport>("/api/report", { scope, id }),
+  // NL query + report. `lang` is the only place the reader's language reaches the API:
+  // it changes generated text, and both endpoints are uncached, so unlike the aggregate
+  // endpoints there is no cache to fork. Everything else stays English-keyed.
+  ask: (question: string, lang: string = "en") =>
+    post<AskResponse>("/api/assistant/ask", { question, lang }),
+  report: (scope: string, id?: string, lang: string = "en") =>
+    post<IntelReport>("/api/report", { scope, id, lang }),
 };

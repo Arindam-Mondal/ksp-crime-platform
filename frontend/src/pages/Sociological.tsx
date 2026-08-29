@@ -14,6 +14,8 @@ import StatCard from "../components/StatCard";
 import Badge from "../components/Badge";
 import { Skeleton, TableSkeleton } from "../components/Skeleton";
 import { CHART, tooltipStyle } from "../components/charts/theme";
+import { useT, type TFunction, type TranslationKey } from "../i18n";
+import { useDataLabel } from "../i18n/data";
 
 // Least-squares fit over {x,y} points → endpoints for a trend segment.
 function linreg(pts: { x: number; y: number }[]) {
@@ -31,28 +33,53 @@ function linreg(pts: { x: number; y: number }[]) {
   return { x0, y0: slope * x0 + intercept, x1, y1: slope * x1 + intercept };
 }
 
-function strength(r: number | null): { label: string; variant: "danger" | "warning" | "info" | "neutral" } {
-  if (r == null) return { label: "n/a", variant: "neutral" };
+/** Returns a catalog key rather than a literal, so the badge variant stays driven by the
+ *  number while the wording follows the reader's language. */
+function strength(r: number | null): {
+  labelKey: TranslationKey;
+  variant: "danger" | "warning" | "info" | "neutral";
+} {
+  if (r == null) return { labelKey: "sociological.strength.na", variant: "neutral" };
   const a = Math.abs(r);
-  if (a >= 0.5) return { label: "strong", variant: "danger" };
-  if (a >= 0.3) return { label: "moderate", variant: "warning" };
-  return { label: "weak", variant: "info" };
+  if (a >= 0.5) return { labelKey: "sociological.strength.strong", variant: "danger" };
+  if (a >= 0.3) return { labelKey: "sociological.strength.moderate", variant: "warning" };
+  return { labelKey: "sociological.strength.weak", variant: "info" };
 }
 
-function reading(name: string, r: number | null): string {
-  if (r == null) return "Not enough data to correlate.";
-  const dir = r >= 0 ? "rises with" : "falls as";
+/** Built from a whole-sentence template per direction — Kannada orders the clause
+ *  differently, so "rises with" can't be a swappable middle fragment. */
+function reading(t: TFunction, nameKey: TranslationKey, r: number | null): string {
+  if (r == null) return t("sociological.reading.noData");
   const a = Math.abs(r);
-  const mag = a >= 0.5 ? "strongly" : a >= 0.3 ? "moderately" : "weakly";
-  return `Crime rate ${mag} ${dir} ${name} (r = ${r.toFixed(2)}).`;
+  const mag = t(
+    a >= 0.5
+      ? "sociological.magnitude.strongly"
+      : a >= 0.3
+      ? "sociological.magnitude.moderately"
+      : "sociological.magnitude.weakly"
+  );
+  return t(r >= 0 ? "sociological.reading.rises" : "sociological.reading.falls", {
+    mag,
+    name: t(nameKey),
+    r: r.toFixed(2),
+  });
 }
 
 const AXIS = { x: { urban: "urban_pct", lit: "literacy_pct", den: "pop_density" } } as const;
+
+/** Correlation factor -> its catalog key, so `strongest` can name itself in either language. */
+const FACTOR_KEY = {
+  urbanization: "sociological.factor.urbanization",
+  literacy: "sociological.factor.literacy",
+  density: "sociological.factor.density",
+} as const satisfies Record<string, TranslationKey>;
 
 export default function Sociological() {
   const socio = useQuery({ queryKey: ["socioeconomic"], queryFn: api.socioeconomic });
   const items = socio.data?.items ?? [];
   const corr = socio.data?.correlations;
+  const t = useT();
+  const dl = useDataLabel();
 
   // Statewide rate (population-weighted), and the biggest "hidden hotspot" mover.
   const totals = useMemo(() => {
@@ -65,7 +92,7 @@ export default function Sociological() {
 
   const strongest = useMemo(() => {
     if (!corr) return null;
-    const entries: [string, number | null][] = [
+    const entries: [keyof typeof FACTOR_KEY, number | null][] = [
       ["urbanization", corr.urbanization], ["literacy", corr.literacy], ["density", corr.density],
     ];
     return entries
@@ -83,72 +110,91 @@ export default function Sociological() {
     <div className="space-y-7">
       <PageHeader
         icon={Building2}
-        eyebrow="Sociological Intelligence"
-        title="The Why Behind the Where"
-        subtitle="Crime normalised per 100,000 residents, correlated with urbanisation, literacy and density (Census 2011)"
+        eyebrow={t("sociological.eyebrow")}
+        title={t("sociological.title")}
+        subtitle={t("sociological.subtitle")}
         actions={
           strongest ? (
             <Badge variant={strength(strongest[1]).variant} dot>
-              {strongest[0]} · strongest correlate
+              {t("sociological.strongestCorrelate", { factor: t(FACTOR_KEY[strongest[0]]) })}
             </Badge>
           ) : undefined
         }
       />
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Statewide crime rate"
-          value={socio.data ? totals.rate.toFixed(1) : "—"}
+          label={t("sociological.stateRate")}
+          value={socio.data ? totals.rate.toFixed(1) : t("common.none")}
           icon={Scale}
-          caption="Cases per 100k residents"
+          caption={t("sociological.stateRateCaption")}
         />
         <StatCard
-          label="Highest-rate district"
-          value={items[0]?.district ?? "—"}
+          label={t("sociological.highestRate")}
+          value={items[0] ? dl("district", items[0].district) : t("common.none")}
           icon={Crosshair}
           accent="danger"
-          caption={items[0] ? `${items[0].per_100k}/100k · ${items[0].cases.toLocaleString()} cases` : undefined}
+          caption={
+            items[0]
+              ? t("sociological.highestRateCaption", {
+                  rate: items[0].per_100k,
+                  cases: items[0].cases.toLocaleString(),
+                })
+              : undefined
+          }
         />
         <StatCard
-          label="Urbanisation ↔ crime"
-          value={corr?.urbanization != null ? `r ${corr.urbanization.toFixed(2)}` : "—"}
+          label={t("sociological.urbanCrime")}
+          value={corr?.urbanization != null ? `r ${corr.urbanization.toFixed(2)}` : t("common.none")}
           icon={TrendingUp}
           accent="info"
-          caption={`${strength(corr?.urbanization ?? null).label} correlation`}
+          caption={t("sociological.correlationCaption", {
+            strength: t(strength(corr?.urbanization ?? null).labelKey),
+          })}
         />
         <StatCard
-          label="Most underrated by volume"
-          value={totals.hidden?.district ?? "—"}
+          label={t("sociological.underrated")}
+          value={totals.hidden ? dl("district", totals.hidden.district) : t("common.none")}
           icon={ShieldAlert}
           accent="warning"
-          caption={totals.hidden ? `+${totals.hidden.rank_shift} ranks worse per-capita` : undefined}
+          caption={
+            totals.hidden
+              ? t("sociological.underratedCaption", { shift: totals.hidden.rank_shift })
+              : undefined
+          }
         />
       </div>
 
       {/* Signature: the reordering — volume rank vs per-capita rank */}
       <Panel
         icon={ArrowUpDown}
-        title="Volume rank → per-capita rank"
-        subtitle="What raw case counts hide: districts that look calm by volume but rank far worse once you divide by population"
+        title={t("sociological.rankShift")}
+        subtitle={t("sociological.rankShiftSubtitle")}
       >
         {socio.isPending ? (
           <TableSkeleton rows={6} />
         ) : hidden.length === 0 ? (
-          <p className="py-4 text-sm text-muted">No district shifts materially between volume and per-capita ranking.</p>
+          <p className="py-4 text-sm text-muted">{t("sociological.noShift")}</p>
         ) : (
           <ul className="space-y-2">
             {hidden.slice(0, 8).map((d) => (
               <li key={d.district} className="flex items-center gap-4 rounded-xl border border-line bg-bg/30 px-4 py-2.5">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">{d.district}</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
+                  {dl("district", d.district)}
+                </span>
                 {/* rank movement */}
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="tabular text-muted">vol #{d.volume_rank}</span>
+                <div className="flex items-center gap-2 text-xs tabular-nums">
+                  <span className="text-muted">{t("sociological.volRank", { rank: d.volume_rank })}</span>
                   <span className="text-warning">→</span>
-                  <span className="tabular font-semibold text-white/90">rate #{d.rate_rank}</span>
+                  <span className="font-semibold text-white/90">
+                    {t("sociological.rateRank", { rank: d.rate_rank })}
+                  </span>
                 </div>
                 <div className="hidden w-40 items-center gap-2 sm:flex">
-                  <span className="tabular w-14 text-right text-xs text-muted">{d.per_100k}/100k</span>
+                  <span className="w-16 text-right text-xs tabular-nums text-muted">
+                    {t("sociological.per100k", { rate: d.per_100k })}
+                  </span>
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/80">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-warning/50 to-warning"
@@ -166,63 +212,65 @@ export default function Sociological() {
       {/* Correlation scatters */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <ScatterPanel
-          title="Crime rate vs urbanisation"
+          title={t("sociological.scatterUrban")}
           xKey={AXIS.x.urban}
-          xLabel="Urban %"
+          xLabel={t("sociological.axis.urban")}
           items={items}
           r={corr?.urbanization ?? null}
           loading={socio.isPending}
-          readingText={reading("urbanisation", corr?.urbanization ?? null)}
+          readingText={reading(t, "sociological.factor.urbanization", corr?.urbanization ?? null)}
         />
         <ScatterPanel
-          title="Crime rate vs literacy"
+          title={t("sociological.scatterLiteracy")}
           xKey={AXIS.x.lit}
-          xLabel="Literacy %"
+          xLabel={t("sociological.axis.literacy")}
           items={items}
           r={corr?.literacy ?? null}
           loading={socio.isPending}
-          readingText={reading("literacy", corr?.literacy ?? null)}
+          readingText={reading(t, "sociological.factor.literacy", corr?.literacy ?? null)}
         />
         <ScatterPanel
-          title="Crime rate vs density"
+          title={t("sociological.scatterDensity")}
           xKey={AXIS.x.den}
-          xLabel="Persons / km²"
+          xLabel={t("sociological.axis.density")}
           items={items}
           r={corr?.density ?? null}
           loading={socio.isPending}
-          readingText={reading("population density", corr?.density ?? null)}
+          readingText={reading(t, "sociological.factor.density", corr?.density ?? null)}
         />
       </div>
 
       {/* Per-capita ranking table */}
       <Panel
         icon={Landmark}
-        title="Districts by crime rate"
+        title={t("sociological.rankingTitle")}
+        // `method` is free-form English prose from the analytics layer; shown only where
+        // it can be read, same treatment as the risk model description on Predictive.
         subtitle={socio.data?.method}
       >
         {socio.isPending ? (
           <TableSkeleton rows={10} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="table-scroll">
+            <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
-                  <th className="py-2.5 pr-4">#</th>
-                  <th className="py-2.5 pr-4">District</th>
-                  <th className="py-2.5 pr-4">Cases</th>
-                  <th className="py-2.5 pr-4">Population</th>
-                  <th className="py-2.5 pr-4">Rate /100k</th>
-                  <th className="py-2.5 pr-4">Urban %</th>
-                  <th className="py-2.5 pr-4">Literacy %</th>
-                  <th className="py-2.5 pr-4">Density</th>
-                  <th className="py-2.5">vs volume</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.rank")}</th>
+                  <th className="py-2.5 pr-4">{t("common.district")}</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.cases")}</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.population")}</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.rate")}</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.urban")}</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.literacy")}</th>
+                  <th className="py-2.5 pr-4">{t("sociological.col.density")}</th>
+                  <th className="py-2.5">{t("sociological.col.vsVolume")}</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((d, i) => (
                   <tr key={d.district} className="border-b border-line/60 transition-colors hover:bg-white/[0.025]">
                     <td className="tabular py-2.5 pr-4 text-muted">{String(i + 1).padStart(2, "0")}</td>
-                    <td className="py-2.5 pr-4 font-medium text-white/90">{d.district}</td>
+                    <td className="py-2.5 pr-4 font-medium text-white/90">{dl("district", d.district)}</td>
                     <td className="tabular py-2.5 pr-4 text-white/70">{d.cases.toLocaleString()}</td>
                     <td className="tabular py-2.5 pr-4 text-white/60">{d.population.toLocaleString()}</td>
                     <td className="tabular py-2.5 pr-4 font-semibold text-white/90">{d.per_100k}</td>
@@ -242,11 +290,7 @@ export default function Sociological() {
                 ))}
               </tbody>
             </table>
-            <p className="mt-3 text-xs leading-relaxed text-muted">
-              <span className="text-warning">▲</span> ranks worse per-capita than by volume (population hides the
-              problem) · <span className="text-info">▼</span> looks large by volume but is proportionate to its
-              population.
-            </p>
+            <p className="mt-3 text-xs leading-relaxed text-muted">{t("sociological.tableNote")}</p>
           </div>
         )}
       </Panel>
@@ -265,7 +309,9 @@ function ScatterPanel({
   loading: boolean;
   readingText: string;
 }) {
-  const pts = items.map((d) => ({ x: d[xKey], y: d.per_100k, district: d.district }));
+  const t = useT();
+  const dl = useDataLabel();
+  const pts = items.map((d) => ({ x: d[xKey], y: d.per_100k, district: dl("district", d.district) }));
   const fit = linreg(pts);
   const s = strength(r);
 
@@ -273,9 +319,13 @@ function ScatterPanel({
     <Panel
       icon={TrendingUp}
       title={title}
-      actions={<Badge variant={s.variant}>{r != null ? `r ${r.toFixed(2)}` : "n/a"} · {s.label}</Badge>}
+      actions={
+        <Badge variant={s.variant}>
+          {r != null ? `r ${r.toFixed(2)}` : t("sociological.strength.na")} · {t(s.labelKey)}
+        </Badge>
+      }
     >
-      <div style={{ height: 220 }}>
+      <div className="h-[200px] sm:h-[220px]">
         {loading ? (
           <Skeleton className="h-full w-full" />
         ) : (
@@ -288,7 +338,7 @@ function ScatterPanel({
                 label={{ value: xLabel, position: "insideBottom", offset: -8, fill: "#8a94ad", fontSize: 10 }}
               />
               <YAxis
-                type="number" dataKey="y" name="Rate"
+                type="number" dataKey="y" name={t("sociological.axis.rate")}
                 tick={CHART.axisTick} tickLine={false} axisLine={false} width={34}
               />
               <ZAxis range={[50, 50]} />
@@ -300,8 +350,14 @@ function ScatterPanel({
                   return (
                     <div style={tooltipStyle as any}>
                       <div style={{ color: "#b6c0d8", fontWeight: 600 }}>{p.district}</div>
-                      <div style={{ color: "#e6eaf2", fontFamily: "JetBrains Mono, monospace" }}>
-                        {p.y}/100k · {xLabel} {p.x}
+                      {/* Inline style, so the Kannada face has to be named here too. */}
+                      <div
+                        style={{
+                          color: "#e6eaf2",
+                          fontFamily: "JetBrains Mono, 'Noto Sans Kannada', monospace",
+                        }}
+                      >
+                        {t("sociological.tooltip", { rate: p.y, axis: xLabel, value: p.x })}
                       </div>
                     </div>
                   );

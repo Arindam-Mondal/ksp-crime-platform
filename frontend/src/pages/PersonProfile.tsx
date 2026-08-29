@@ -19,10 +19,13 @@ import EmptyState from "../components/EmptyState";
 import { Skeleton, TableSkeleton } from "../components/Skeleton";
 import DonutChart from "../components/charts/DonutChart";
 import ForceGraph from "../components/network/ForceGraph";
+import { useResponsiveHeight } from "../lib/useResponsiveHeight";
 import {
   CHART, tooltipStyle, tooltipLabelStyle, tooltipItemStyle, cursorFill,
   HEAD_COLORS, PALETTE,
 } from "../components/charts/theme";
+import { useT, type TranslationKey } from "../i18n";
+import { useDataLabel } from "../i18n/data";
 
 const THREAT_VARIANT: Record<string, any> = { Low: "success", Medium: "warning", High: "danger" };
 const THREAT_RING: Record<string, string> = { Low: "#10b981", Medium: "#f59e0b", High: "#ef4444" };
@@ -36,6 +39,9 @@ function statusVariant(s: string): any {
   if (s === "Closed - Undetected") return "danger";
   return "neutral";
 }
+// Dates stay `en-GB` in both languages by design: Karnataka Police records use Western
+// numerals and short English month names, and `kn-IN` would render Kannada digits
+// (೧೨೩), breaking both the tabular alignment and the convention officers read.
 function fmtDate(dt: string): string {
   if (!dt) return "—";
   const d = new Date(dt.replace(" ", "T"));
@@ -47,6 +53,13 @@ function fmtMonthYear(dt: string | null): string {
   return isNaN(+d) ? dt.slice(0, 7) : d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
 }
 
+/** ERD gender codes -> catalog keys. */
+const GENDER_KEY: Record<string, TranslationKey> = {
+  F: "person.gender.female",
+  T: "person.gender.transgender",
+  M: "person.gender.male",
+};
+
 const OSM_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
@@ -56,6 +69,7 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
 };
 
 function CrimeMap({ crimes }: { crimes: CrimeRow[] }) {
+  const t = useT();
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const pts = useMemo(() => crimes.filter((c) => c.lat != null && c.lon != null), [crimes]);
@@ -96,12 +110,15 @@ function CrimeMap({ crimes }: { crimes: CrimeRow[] }) {
     return () => { map.remove(); mapRef.current = null; };
   }, [pts]);
 
-  if (pts.length === 0) return <EmptyState icon={MapPin} title="No geocoded cases" hint="This person's FIRs have no mapped coordinates." />;
-  return <div ref={el} className="h-[420px] w-full overflow-hidden rounded-b-2xl" />;
+  if (pts.length === 0)
+    return <EmptyState icon={MapPin} title={t("person.noGeocoded")} hint={t("person.noGeocodedHint")} />;
+  return <div ref={el} className="h-[clamp(300px,52svh,420px)] w-full overflow-hidden rounded-b-2xl" />;
 }
 
 function AssociateRow({ rootId, a }: { rootId: string; a: Associate }) {
   const [open, setOpen] = useState(false);
+  const t = useT();
+  const dl = useDataLabel();
   const rel = useQuery({ queryKey: ["rel", rootId, a.person_id], queryFn: () => api.relationship(rootId, a.person_id), enabled: open });
   return (
     <li className="rounded-lg border border-line/70 bg-bg/30">
@@ -109,10 +126,14 @@ function AssociateRow({ rootId, a }: { rootId: string; a: Associate }) {
         <Avatar id={a.person_id} gender={a.gender} name={a.name} size={34} />
         <Link to={`/person/${a.person_id}`} className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-white/90 hover:text-accent-soft">{a.name}</span>
-          <span className="block text-[11px] text-muted">mostly {a.top_shared_crime || "—"}</span>
+          <span className="block text-[11px] text-muted">
+            {t("person.mostlyCrime", {
+              crime: a.top_shared_crime ? dl("crimeSubHead", a.top_shared_crime) : t("common.none"),
+            })}
+          </span>
         </Link>
-        <Badge variant="accent">{a.shared} shared</Badge>
-        <button onClick={() => setOpen((v) => !v)} className="grid h-7 w-7 place-items-center rounded-md text-muted transition-colors hover:bg-white/5 hover:text-white" aria-label="Toggle shared cases">
+        <Badge variant="accent">{t("person.sharedCount", { count: a.shared })}</Badge>
+        <button onClick={() => setOpen((v) => !v)} className="grid h-7 w-7 place-items-center rounded-md text-muted transition-colors hover:bg-white/5 hover:text-white" aria-label={t("person.toggleShared")}>
           <ChevronDown size={15} className={`transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
@@ -124,10 +145,10 @@ function AssociateRow({ rootId, a }: { rootId: string; a: Associate }) {
             <ul className="space-y-1.5">
               {(rel.data?.shared ?? []).map((s) => (
                 <li key={s.id} className="flex items-center gap-2 text-xs">
-                  <Badge variant={gravityVariant(s.gravity)}>{s.gravity}</Badge>
+                  <Badge variant={gravityVariant(s.gravity)}>{dl("gravity", s.gravity)}</Badge>
                   <span className="tabular text-muted">{s.crime_no}</span>
-                  <span className="text-white/80">{s.sub_head}</span>
-                  <span className="text-muted">· {s.district}</span>
+                  <span className="text-white/80">{dl("crimeSubHead", s.sub_head)}</span>
+                  <span className="text-muted">· {dl("district", s.district)}</span>
                   <span className="tabular ml-auto text-muted">{fmtDate(s.datetime)}</span>
                 </li>
               ))}
@@ -147,12 +168,19 @@ export default function PersonProfile() {
   const moq = useQuery({ queryKey: ["mo", id], queryFn: () => api.mo(id), enabled: !!id });
 
   const [showAll, setShowAll] = useState(false);
+  const graphHeight = useResponsiveHeight(440, 300, 0.5);
+  const t = useT();
+  const dl = useDataLabel();
 
   if (profile.isError) {
     return (
       <div className="space-y-6">
         <BackLink />
-        <EmptyState icon={Fingerprint} title="Person not found" hint={`No record for ${id}.`} />
+        <EmptyState
+          icon={Fingerprint}
+          title={t("person.notFound")}
+          hint={t("person.notFoundHint", { id })}
+        />
       </div>
     );
   }
@@ -175,15 +203,31 @@ export default function PersonProfile() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl font-bold tracking-tight text-white">{p.person.name}</h1>
-                <Badge variant={THREAT_VARIANT[p.threat.level]} dot>{p.threat.level} threat · {p.threat.score}</Badge>
+                {/* The English threat level stays the variant/ring lookup key. */}
+                <Badge variant={THREAT_VARIANT[p.threat.level]} dot>
+                  {t("person.threat", {
+                    level: dl("severity", p.threat.level),
+                    score: p.threat.score,
+                  })}
+                </Badge>
               </div>
-              <div className="tabular mt-1 text-sm text-muted">
-                {p.person.id} · identity resolved across {p.stats.total_cases} FIR{p.stats.total_cases === 1 ? "" : "s"}
+              <div className="mt-1 text-sm tabular-nums text-muted">
+                {t(
+                  p.stats.total_cases === 1
+                    ? "person.identityResolved_one"
+                    : "person.identityResolved_other",
+                  { id: p.person.id, count: p.stats.total_cases }
+                )}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Chip icon={Users}>{p.person.gender === "F" ? "Female" : p.person.gender === "T" ? "Transgender" : "Male"} · {p.person.age ?? "?"} yrs</Chip>
+                <Chip icon={Users}>
+                  {t("person.ageChip", {
+                    gender: t(GENDER_KEY[p.person.gender] ?? "person.gender.male"),
+                    age: p.person.age ?? t("person.ageUnknown"),
+                  })}
+                </Chip>
                 <Chip icon={MapPin}>
-                  {p.person.districts.slice(0, 3).join(", ")}
+                  {p.person.districts.slice(0, 3).map((n) => dl("district", n)).join(", ")}
                   {p.person.districts.length > 3 ? ` +${p.person.districts.length - 3}` : ""}
                 </Chip>
                 <Chip icon={Clock}>{fmtMonthYear(p.stats.first_seen)} → {fmtMonthYear(p.stats.last_seen)}</Chip>
@@ -194,16 +238,51 @@ export default function PersonProfile() {
       )}
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Linked FIRs" value={p ? String(p.stats.total_cases) : "—"} icon={Layers} accent="danger" caption={p?.stats.top_crime ? `Mostly ${p.stats.top_crime}` : undefined} />
-        <StatCard label="Heinous cases" value={p ? String(p.stats.heinous_cases) : "—"} icon={ShieldAlert} accent="warning" caption={p ? `of ${p.stats.total_cases} total` : undefined} />
-        <StatCard label="Co-accused" value={p ? String(p.stats.co_accused) : "—"} icon={Users} accent="info" caption="Linked associates" />
-        <StatCard label="Arrests" value={p ? String(p.stats.arrests + p.stats.surrenders) : "—"} icon={Lock} accent="success" caption={p ? `${p.stats.surrenders} surrendered · ${p.stats.chargesheet_rate}% chargesheeted` : undefined} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label={t("person.linkedFirs")}
+          value={p ? String(p.stats.total_cases) : t("common.none")}
+          icon={Layers}
+          accent="danger"
+          caption={
+            p?.stats.top_crime
+              ? t("person.mostly", { crime: dl("crimeSubHead", p.stats.top_crime) })
+              : undefined
+          }
+        />
+        <StatCard
+          label={t("person.heinousCases")}
+          value={p ? String(p.stats.heinous_cases) : t("common.none")}
+          icon={ShieldAlert}
+          accent="warning"
+          caption={p ? t("person.ofTotal", { count: p.stats.total_cases }) : undefined}
+        />
+        <StatCard
+          label={t("person.coAccused")}
+          value={p ? String(p.stats.co_accused) : t("common.none")}
+          icon={Users}
+          accent="info"
+          caption={t("person.linkedAssociates")}
+        />
+        <StatCard
+          label={t("person.arrests")}
+          value={p ? String(p.stats.arrests + p.stats.surrenders) : t("common.none")}
+          icon={Lock}
+          accent="success"
+          caption={
+            p
+              ? t("person.arrestCaption", {
+                  surrendered: p.stats.surrenders,
+                  rate: p.stats.chargesheet_rate,
+                })
+              : undefined
+          }
+        />
       </div>
 
       {/* Timeline */}
-      <Panel icon={Activity} title="Activity timeline" subtitle="Monthly FIR involvement">
-        <div style={{ height: 220 }}>
+      <Panel icon={Activity} title={t("person.timeline")} subtitle={t("person.timelineSubtitle")}>
+        <div className="h-[200px] sm:h-[220px]">
           {profile.isPending ? (
             <Skeleton className="h-full w-full" />
           ) : (
@@ -228,24 +307,25 @@ export default function PersonProfile() {
 
       {/* Crime mix + sections */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Panel icon={ListChecks} title="Crime sub-heads">
+        <Panel icon={ListChecks} title={t("person.subHeads")}>
           {profile.isPending || !p ? <Skeleton className="h-[200px] w-full" /> : (
-            <DonutChart data={p.crime_mix.by_type.map((x) => ({ name: x.name, value: x.count }))} colors={(_, i) => PALETTE[i % PALETTE.length]} height={200} />
+            <DonutChart data={p.crime_mix.by_type.map((x) => ({ name: x.name, label: dl("crimeSubHead", x.name), value: x.count }))} colors={(_, i) => PALETTE[i % PALETTE.length]} height={200} />
           )}
         </Panel>
-        <Panel icon={ShieldAlert} title="Crime heads">
+        <Panel icon={ShieldAlert} title={t("person.crimeHeads")}>
           {profile.isPending || !p ? <Skeleton className="h-[200px] w-full" /> : (
-            <DonutChart data={p.crime_mix.by_head.map((x) => ({ name: x.name, value: x.count }))} colors={(n) => HEAD_COLORS[n] ?? CHART.accent} height={200} />
+            <DonutChart data={p.crime_mix.by_head.map((x) => ({ name: x.name, label: dl("crimeHead", x.name), value: x.count }))} colors={(n) => HEAD_COLORS[n] ?? CHART.accent} height={200} />
           )}
         </Panel>
-        <Panel icon={FileText} title="Sections invoked" subtitle="Across all linked FIRs">
+        {/* Act/Section citations ("IPC 302") stay English in both languages. */}
+        <Panel icon={FileText} title={t("person.sections")} subtitle={t("person.sectionsSubtitle")}>
           {profile.isPending || !p ? <Skeleton className="h-[200px] w-full" /> : (
             <div className="flex flex-wrap gap-2">
               {p.top_sections.length ? p.top_sections.map((m) => (
                 <span key={m.name} className="rounded-full border border-line bg-surface-2/60 px-3 py-1 text-xs text-white/80">
                   {m.name} <span className="tabular text-muted">×{m.count}</span>
                 </span>
-              )) : <span className="text-sm text-muted">No sections recorded.</span>}
+              )) : <span className="text-sm text-muted">{t("person.noSections")}</span>}
             </div>
           )}
         </Panel>
@@ -255,11 +335,16 @@ export default function PersonProfile() {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Panel
           icon={Fingerprint}
-          title="Modus operandi signature"
-          subtitle="Behavioural fingerprint derived from all linked FIRs"
+          title={t("person.mo")}
+          subtitle={t("person.moSubtitle")}
           actions={
             moq.data?.signature.dominant_time ? (
-              <Badge variant="info"><Clock size={11} /> mostly {moq.data.signature.dominant_time.toLowerCase()}</Badge>
+              <Badge variant="info">
+                <Clock size={11} />{" "}
+                {t("person.mostlyTime", {
+                  time: dl("timeBucket", moq.data.signature.dominant_time),
+                })}
+              </Badge>
             ) : undefined
           }
         >
@@ -269,11 +354,15 @@ export default function PersonProfile() {
             <div className="space-y-4">
               {/* top crimes with share bars */}
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Signature crimes</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+                  {t("person.signatureCrimes")}
+                </div>
                 <div className="space-y-1.5">
                   {moq.data.signature.top_crimes.map((c) => (
                     <div key={c.name} className="flex items-center gap-3">
-                      <span className="w-40 shrink-0 truncate text-xs text-white/85">{c.name}</span>
+                      <span className="w-40 shrink-0 truncate text-xs text-white/85" title={dl("crimeSubHead", c.name)}>
+                        {dl("crimeSubHead", c.name)}
+                      </span>
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/80">
                         <div className="h-full rounded-full bg-gradient-to-r from-accent/50 to-accent" style={{ width: `${c.share}%` }} />
                       </div>
@@ -284,17 +373,21 @@ export default function PersonProfile() {
               </div>
               {/* time-of-day profile */}
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">When they strike</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+                  {t("person.whenTheyStrike")}
+                </div>
                 <div className="grid grid-cols-4 gap-2">
-                  {moq.data.signature.time_profile.map((t) => {
+                  {moq.data.signature.time_profile.map((tp) => {
                     const max = Math.max(1, ...moq.data!.signature.time_profile.map((x) => x.count));
-                    const on = t.bucket === moq.data!.signature.dominant_time;
+                    const on = tp.bucket === moq.data!.signature.dominant_time;
                     return (
-                      <div key={t.bucket} className="rounded-lg border border-line bg-bg/30 px-2 py-2 text-center">
+                      <div key={tp.bucket} className="rounded-lg border border-line bg-bg/30 px-2 py-2 text-center">
                         <div className="mx-auto flex h-12 items-end justify-center">
-                          <div className={`w-4 rounded-t ${on ? "bg-accent" : "bg-surface-2"}`} style={{ height: `${Math.max(8, (t.count / max) * 100)}%` }} />
+                          <div className={`w-4 rounded-t ${on ? "bg-accent" : "bg-surface-2"}`} style={{ height: `${Math.max(8, (tp.count / max) * 100)}%` }} />
                         </div>
-                        <div className={`mt-1 text-[10px] ${on ? "text-white/85" : "text-muted"}`}>{t.bucket}</div>
+                        <div className={`mt-1 text-[10px] ${on ? "text-white/85" : "text-muted"}`}>
+                          {dl("timeBucket", tp.bucket)}
+                        </div>
                       </div>
                     );
                   })}
@@ -303,29 +396,35 @@ export default function PersonProfile() {
               {/* sections + jurisdiction spread */}
               <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-3">
                 <div>
-                  <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Legal fingerprint</div>
+                  <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">
+                    {t("person.legalFingerprint")}
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
                     {moq.data.signature.top_sections.length ? moq.data.signature.top_sections.map((s) => (
                       <span key={s} className="rounded-full border border-line bg-surface-2/60 px-2.5 py-1 text-[11px] text-white/80">{s}</span>
-                    )) : <span className="text-xs text-muted">No sections recorded.</span>}
+                    )) : <span className="text-xs text-muted">{t("person.noSections")}</span>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted">
-                  <MapPin size={13} /> operates across
-                  <span className="tabular font-semibold text-white/85">{moq.data.signature.jurisdictions.length}</span>
-                  district{moq.data.signature.jurisdictions.length === 1 ? "" : "s"}
+                <div className="flex items-center gap-2 text-xs tabular-nums text-muted">
+                  <MapPin size={13} />
+                  {t(
+                    moq.data.signature.jurisdictions.length === 1
+                      ? "person.operatesAcross_one"
+                      : "person.operatesAcross_other",
+                    { count: moq.data.signature.jurisdictions.length }
+                  )}
                 </div>
               </div>
             </div>
           ) : (
-            <EmptyState icon={Fingerprint} title="No MO signature" hint="Not enough linked cases to profile this person's method." />
+            <EmptyState icon={Fingerprint} title={t("person.noMo")} hint={t("person.noMoHint")} />
           )}
         </Panel>
 
         <Panel
           icon={Radar}
-          title="Same MO across jurisdictions"
-          subtitle="Offenders whose method most closely matches — the recurring MO the challenge asks us to surface"
+          title={t("person.sameMo")}
+          subtitle={t("person.sameMoSubtitle")}
         >
           {moq.isPending ? (
             <TableSkeleton rows={5} />
@@ -334,76 +433,85 @@ export default function PersonProfile() {
               {moq.data.matches.map((m) => <MoMatchRow key={m.person_id} m={m} />)}
             </ul>
           ) : (
-            <EmptyState icon={Radar} title="No behavioural matches" hint="No other repeat offender shares a comparable modus operandi." />
+            <EmptyState icon={Radar} title={t("person.noMatches")} hint={t("person.noMatchesHint")} />
           )}
         </Panel>
       </div>
 
       {/* Arrest history */}
-      <Panel icon={Lock} title="Arrest & surrender history" subtitle="From the ArrestSurrender table">
+      <Panel icon={Lock} title={t("person.arrestHistory")} subtitle={t("person.arrestHistorySubtitle")}>
         {profile.isPending ? (
           <TableSkeleton rows={3} />
         ) : p && p.arrest_history.length ? (
           <ul className="space-y-2">
             {p.arrest_history.map((a, i) => (
               <li key={i} className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line bg-bg/30 px-4 py-2.5 text-sm">
-                <Badge variant={a.type === "Surrender" ? "info" : "warning"}>{a.type}</Badge>
+                {/* The English arrest type stays the variant lookup key. */}
+                <Badge variant={a.type === "Surrender" ? "info" : "warning"}>
+                  {dl("arrestType", a.type)}
+                </Badge>
                 <span className="tabular text-white/85">{fmtDate(a.date)}</span>
-                <span className="text-muted">· {a.sub_head}</span>
+                <span className="text-muted">· {dl("crimeSubHead", a.sub_head)}</span>
                 <span className="tabular text-muted">{a.crime_no}</span>
                 <span className="ml-auto text-xs text-white/70">
-                  {a.district}{a.state && a.state !== "Karnataka" ? `, ${a.state} (out-of-state)` : ""}
+                  {a.state && a.state !== "Karnataka"
+                    ? t("person.outOfState", {
+                        district: dl("district", a.district),
+                        state: dl("state", a.state),
+                      })
+                    : dl("district", a.district)}
                 </span>
               </li>
             ))}
           </ul>
         ) : (
-          <EmptyState icon={Lock} title="No arrests recorded" hint="No arrest or surrender events are linked to this person." />
+          <EmptyState icon={Lock} title={t("person.noArrests")} hint={t("person.noArrestsHint")} />
         )}
       </Panel>
 
       {/* Crime map */}
-      <Panel icon={MapPin} title="Crime map" subtitle="Case locations — red = heinous" bodyClassName="p-0">
-        {profile.isPending ? <Skeleton className="h-[420px] w-full" /> : <CrimeMap crimes={crimes} />}
+      <Panel icon={MapPin} title={t("person.crimeMap")} subtitle={t("person.crimeMapSubtitle")} bodyClassName="p-0">
+        {profile.isPending ? <Skeleton className="h-[clamp(300px,52svh,420px)] w-full" /> : <CrimeMap crimes={crimes} />}
       </Panel>
 
       {/* Crime history table */}
       <Panel
         icon={ListChecks}
-        title="Case history"
-        subtitle={p ? `${crimes.length} linked FIRs` : undefined}
+        title={t("person.caseHistory")}
+        subtitle={p ? t("person.caseHistorySubtitle", { count: crimes.length }) : undefined}
         actions={crimes.length > 10 ? (
           <button onClick={() => setShowAll((v) => !v)} className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition-colors hover:border-line-strong hover:text-white">
-            {showAll ? "Show top 10" : `Show all ${crimes.length}`}
+            {showAll ? t("person.showTop10") : t("person.showAll", { count: crimes.length })}
           </button>
         ) : undefined}
       >
         {profile.isPending ? (
           <TableSkeleton rows={8} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="table-scroll">
+            <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
-                  <th className="py-2.5 pr-4">Crime No</th>
-                  <th className="py-2.5 pr-4">Sub-head</th>
-                  <th className="py-2.5 pr-4">Sections</th>
-                  <th className="py-2.5 pr-4">Gravity</th>
-                  <th className="py-2.5 pr-4">District</th>
-                  <th className="py-2.5 pr-4">Date</th>
-                  <th className="py-2.5">Status</th>
+                  <th className="py-2.5 pr-4">{t("person.col.crimeNo")}</th>
+                  <th className="py-2.5 pr-4">{t("person.col.subHead")}</th>
+                  <th className="py-2.5 pr-4">{t("person.col.sections")}</th>
+                  <th className="py-2.5 pr-4">{t("person.col.gravity")}</th>
+                  <th className="py-2.5 pr-4">{t("common.district")}</th>
+                  <th className="py-2.5 pr-4">{t("person.col.date")}</th>
+                  <th className="py-2.5">{t("person.col.status")}</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleCrimes.map((c) => (
                   <tr key={c.id} className="border-b border-line/60 transition-colors hover:bg-white/[0.025]">
                     <td className="tabular py-2.5 pr-4 text-muted">{c.crime_no}</td>
-                    <td className="py-2.5 pr-4 font-medium text-white/90">{c.sub_head}</td>
+                    <td className="py-2.5 pr-4 font-medium text-white/90">{dl("crimeSubHead", c.sub_head)}</td>
                     <td className="tabular py-2.5 pr-4 text-white/60">{c.sections.join(", ")}</td>
-                    <td className="py-2.5 pr-4"><Badge variant={gravityVariant(c.gravity)}>{c.gravity}</Badge></td>
-                    <td className="py-2.5 pr-4 text-white/70">{c.district}</td>
+                    <td className="py-2.5 pr-4"><Badge variant={gravityVariant(c.gravity)}>{dl("gravity", c.gravity)}</Badge></td>
+                    <td className="py-2.5 pr-4 text-white/70">{dl("district", c.district)}</td>
                     <td className="tabular py-2.5 pr-4 text-white/70">{fmtDate(c.datetime)}</td>
-                    <td className="py-2.5"><Badge variant={statusVariant(c.status)}>{c.status}</Badge></td>
+                    {/* statusVariant() keeps reading the English status. */}
+                    <td className="py-2.5"><Badge variant={statusVariant(c.status)}>{dl("caseStatus", c.status)}</Badge></td>
                   </tr>
                 ))}
               </tbody>
@@ -414,7 +522,7 @@ export default function PersonProfile() {
 
       {/* Associations + mini graph */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel icon={Users} title="Known associates" subtitle={p ? `${p.associates.length} co-accused · expand for shared cases` : undefined}>
+        <Panel icon={Users} title={t("person.associates")} subtitle={p ? t("person.associatesSubtitle", { count: p.associates.length }) : undefined}>
           {profile.isPending ? (
             <TableSkeleton rows={6} />
           ) : p && p.associates.length ? (
@@ -422,17 +530,17 @@ export default function PersonProfile() {
               {p.associates.map((a) => <AssociateRow key={a.person_id} rootId={id} a={a} />)}
             </ul>
           ) : (
-            <EmptyState icon={Users} title="No known associates" hint="This person has no recorded co-accused links." />
+            <EmptyState icon={Users} title={t("person.noAssociates")} hint={t("person.noAssociatesHint")} />
           )}
         </Panel>
 
-        <Panel icon={GitBranch} title="Association graph" subtitle={ego.data && ego.data.nodes.length > 1 ? "Click a node to open that person's profile" : undefined} bodyClassName="p-0">
+        <Panel icon={GitBranch} title={t("person.graph")} subtitle={ego.data && ego.data.nodes.length > 1 ? t("person.graphSubtitle") : undefined} bodyClassName="p-0">
           {ego.isPending ? (
-            <Skeleton className="h-[440px] w-full" />
+            <Skeleton className="w-full" style={{ height: graphHeight }} />
           ) : ego.data && ego.data.nodes.length > 1 ? (
-            <ForceGraph nodes={ego.data.nodes} edges={ego.data.edges} height={440} nodeScale={0.78} onNodeClick={(pid) => pid !== id && navigate(`/person/${pid}`)} />
+            <ForceGraph nodes={ego.data.nodes} edges={ego.data.edges} height={graphHeight} nodeScale={0.78} onNodeClick={(pid) => pid !== id && navigate(`/person/${pid}`)} />
           ) : (
-            <EmptyState icon={GitBranch} title="No network" hint="No co-accused links to graph." />
+            <EmptyState icon={GitBranch} title={t("person.noNetwork")} hint={t("person.noNetworkHint")} />
           )}
         </Panel>
       </div>
@@ -442,29 +550,36 @@ export default function PersonProfile() {
 
 function MoMatchRow({ m }: { m: MoMatch }) {
   const pct = Math.round(m.similarity * 100);
+  const t = useT();
+  const dl = useDataLabel();
+  const sharedCrimes = m.shared_crimes.map((c) => dl("crimeSubHead", c));
   return (
     <li className="rounded-lg border border-line/70 bg-bg/30 px-3 py-2.5">
       <div className="flex items-center gap-3">
         <Avatar id={m.person_id} gender={m.gender} name={m.name} size={34} />
         <Link to={`/person/${m.person_id}`} className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-white/90 hover:text-accent-soft">{m.name}</span>
-          <span className="tabular block text-[11px] text-muted">{m.person_id} · {m.cases} FIRs</span>
+          <span className="block text-[11px] tabular-nums text-muted">
+            {t("person.firCount", { id: m.person_id, count: m.cases })}
+          </span>
         </Link>
         <div className="flex items-center gap-2">
           {m.different_jurisdiction && (
-            <Badge variant="warning"><MoveRight size={11} /> cross-district</Badge>
+            <Badge variant="warning"><MoveRight size={11} /> {t("person.crossDistrict")}</Badge>
           )}
-          {m.is_associate && <Badge variant="neutral">known associate</Badge>}
-          <Badge variant="accent">{pct}% match</Badge>
+          {m.is_associate && <Badge variant="neutral">{t("person.knownAssociate")}</Badge>}
+          <Badge variant="accent">{t("person.matchPct", { pct })}</Badge>
         </div>
       </div>
       <div className="mt-2 flex items-center gap-3">
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/80">
           <div className="h-full rounded-full bg-gradient-to-r from-accent/50 to-accent" style={{ width: `${pct}%` }} />
         </div>
-        <span className="truncate text-[11px] text-muted" title={m.shared_crimes.join(", ")}>
-          shares {m.shared_crimes.slice(0, 2).join(", ") || "timing & sections"}
-          {m.shared_sections ? ` · ${m.shared_sections} sections` : ""}
+        <span className="truncate text-[11px] text-muted" title={sharedCrimes.join(", ")}>
+          {t("person.shares", {
+            what: sharedCrimes.slice(0, 2).join(", ") || t("person.sharesFallback"),
+          })}
+          {m.shared_sections ? t("person.sharesSections", { count: m.shared_sections }) : ""}
         </span>
       </div>
     </li>
@@ -472,9 +587,10 @@ function MoMatchRow({ m }: { m: MoMatch }) {
 }
 
 function BackLink() {
+  const t = useT();
   return (
     <Link to="/network" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-white">
-      <ArrowLeft size={15} /> Back to network
+      <ArrowLeft size={15} /> {t("person.back")}
     </Link>
   );
 }

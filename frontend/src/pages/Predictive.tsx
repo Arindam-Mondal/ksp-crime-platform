@@ -6,9 +6,13 @@ import Panel from "../components/Panel";
 import PageHeader from "../components/PageHeader";
 import Badge from "../components/Badge";
 import { TableSkeleton, ListSkeleton } from "../components/Skeleton";
+import { useLang, useT, useTDynamic } from "../i18n";
+import { translateParams, useDataLabel } from "../i18n/data";
 
 type SortKey = "risk_score" | "cases" | "heinous_share" | "pendency_rate";
 
+/** `label` stays the English tier name: it is the lookup key into the severity map and
+ *  the value `highCount` counts on. Translate it only where it is painted. */
 function riskTier(score: number, max: number): { label: string; variant: "danger" | "warning" | "success" } {
   const r = max ? score / max : 0;
   if (r >= 0.66) return { label: "High", variant: "danger" };
@@ -26,6 +30,10 @@ export default function Predictive() {
   const risk = useQuery({ queryKey: ["riskScores"], queryFn: api.riskScores });
   const anomalies = useQuery({ queryKey: ["anomalies"], queryFn: api.anomalies });
   const [sort, setSort] = useState<SortKey>("risk_score");
+  const t = useT();
+  const tD = useTDynamic();
+  const d = useDataLabel();
+  const { lang } = useLang();
 
   const items = risk.data?.items ?? [];
   const max = items.reduce((m, r) => Math.max(m, r.risk_score), 0) || 1;
@@ -37,10 +45,14 @@ export default function Predictive() {
 
   const highCount = items.filter((r) => riskTier(r.risk_score, max).label === "High").length;
 
+  // `method` is free-form English prose from the model layer, so there is nothing to
+  // key a translation off; Kannada falls back to the static description of the ranking.
+  const subtitle = lang === "kn" ? t("predictive.subtitle") : risk.data?.method ?? t("predictive.subtitle");
+
   const SortBtn = ({ k, children }: { k: SortKey; children: string }) => (
     <button
       onClick={() => setSort(k)}
-      className={`inline-flex items-center gap-1 transition-colors ${
+      className={`seg-btn -mx-1 inline-flex items-center gap-1 rounded px-1 py-1.5 transition-colors ${
         sort === k ? "text-accent-soft" : "text-muted hover:text-white/80"
       }`}
     >
@@ -53,13 +65,13 @@ export default function Predictive() {
     <div className="space-y-7">
       <PageHeader
         icon={TrendingUp}
-        eyebrow="Predictive & Anomaly AI"
-        title="District Risk Ranking"
-        subtitle={risk.data?.method ?? "Composite risk model over precomputed district statistics"}
+        eyebrow={t("predictive.eyebrow")}
+        title={t("predictive.title")}
+        subtitle={subtitle}
         actions={
           items.length ? (
             <Badge variant="danger" dot>
-              {highCount} high-risk
+              {t("predictive.highRisk", { count: highCount })}
             </Badge>
           ) : undefined
         }
@@ -67,35 +79,35 @@ export default function Predictive() {
 
       <Panel
         icon={ShieldAlert}
-        title="Risk-scored districts"
-        subtitle="Volume · heinous concentration · investigative pendency · 90-day momentum"
+        title={t("predictive.riskTable.title")}
+        subtitle={t("predictive.riskTable.subtitle")}
       >
         {risk.isPending ? (
           <TableSkeleton rows={10} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="table-scroll">
+            <table className="w-full min-w-[880px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wider text-muted">
-                  <th className="py-2.5 pr-4 font-semibold">#</th>
-                  <th className="py-2.5 pr-4 font-semibold">District</th>
+                  <th className="py-2.5 pr-4 font-semibold">{t("predictive.col.rank")}</th>
+                  <th className="py-2.5 pr-4 font-semibold">{t("common.district")}</th>
                   <th className="py-2.5 pr-4 font-semibold">
-                    <SortBtn k="cases">Cases</SortBtn>
+                    <SortBtn k="cases">{t("predictive.col.cases")}</SortBtn>
                   </th>
-                  <th className="py-2.5 pr-4 font-semibold" title="Cases per 100,000 residents (Census 2011)">
-                    Rate/100k
-                  </th>
-                  <th className="py-2.5 pr-4 font-semibold">
-                    <SortBtn k="heinous_share">Heinous</SortBtn>
+                  <th className="py-2.5 pr-4 font-semibold" title={t("predictive.col.rate100kHint")}>
+                    {t("predictive.col.rate100k")}
                   </th>
                   <th className="py-2.5 pr-4 font-semibold">
-                    <SortBtn k="pendency_rate">Pendency</SortBtn>
+                    <SortBtn k="heinous_share">{t("predictive.col.heinous")}</SortBtn>
                   </th>
-                  <th className="py-2.5 pr-4 font-semibold">CS rate</th>
-                  <th className="py-2.5 pr-4 font-semibold">90d</th>
-                  <th className="py-2.5 pr-4 font-semibold">Tier</th>
+                  <th className="py-2.5 pr-4 font-semibold">
+                    <SortBtn k="pendency_rate">{t("predictive.col.pendency")}</SortBtn>
+                  </th>
+                  <th className="py-2.5 pr-4 font-semibold">{t("predictive.col.chargesheetRate")}</th>
+                  <th className="py-2.5 pr-4 font-semibold">{t("predictive.col.recent90d")}</th>
+                  <th className="py-2.5 pr-4 font-semibold">{t("predictive.col.tier")}</th>
                   <th className="w-1/4 py-2.5 font-semibold">
-                    <SortBtn k="risk_score">Risk score</SortBtn>
+                    <SortBtn k="risk_score">{t("predictive.col.riskScore")}</SortBtn>
                   </th>
                 </tr>
               </thead>
@@ -108,15 +120,19 @@ export default function Predictive() {
                       className="border-b border-line/60 transition-colors hover:bg-white/[0.025]"
                     >
                       <td className="tabular py-2.5 pr-4 text-muted">{String(i + 1).padStart(2, "0")}</td>
-                      <td className="py-2.5 pr-4 font-medium text-white/90">{r.district}</td>
+                      <td className="py-2.5 pr-4 font-medium text-white/90">
+                        {d("district", r.district)}
+                      </td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.cases.toLocaleString()}</td>
-                      <td className="tabular py-2.5 pr-4 text-white/70">{r.per_100k ?? "—"}</td>
+                      <td className="tabular py-2.5 pr-4 text-white/70">
+                        {r.per_100k ?? t("common.none")}
+                      </td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.heinous_share}%</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.pendency_rate}%</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.chargesheet_rate}%</td>
                       <td className="tabular py-2.5 pr-4 text-white/70">{r.recent_90d}</td>
                       <td className="py-2.5 pr-4">
-                        <Badge variant={tier.variant}>{tier.label}</Badge>
+                        <Badge variant={tier.variant}>{d("severity", tier.label)}</Badge>
                       </td>
                       <td className="py-2.5">
                         <div className="flex items-center gap-3">
@@ -149,16 +165,20 @@ export default function Predictive() {
       {/* Anomaly call-outs */}
       <Panel
         icon={Radar}
-        title="Anomaly call-outs"
-        subtitle="Statistical outliers — volume spikes & unusual timing"
+        title={t("predictive.anomalies.title")}
+        subtitle={t("predictive.anomalies.subtitle")}
         actions={
-          anomalies.data ? <Badge variant="warning" dot>{anomalies.data.count} flagged</Badge> : undefined
+          anomalies.data ? (
+            <Badge variant="warning" dot>
+              {t("predictive.anomalies.flagged", { count: anomalies.data.count })}
+            </Badge>
+          ) : undefined
         }
       >
         {anomalies.isPending ? (
           <ListSkeleton rows={5} />
         ) : (anomalies.data?.items.length ?? 0) === 0 ? (
-          <p className="py-6 text-center text-sm text-muted">No anomalies detected in the current window.</p>
+          <p className="py-6 text-center text-sm text-muted">{t("predictive.anomalies.none")}</p>
         ) : (
           <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {anomalies.data!.items.map((a, i) => {
@@ -170,10 +190,18 @@ export default function Predictive() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-white/90">{a.subject}</span>
+                      {/* The subject is a district for volume/multivariate anomalies and
+                          a crime sub-head for temporal ones. */}
+                      <span className="truncate text-sm font-semibold text-white/90">
+                        {d(a.kind === "temporal" ? "crimeSubHead" : "district", a.subject)}
+                      </span>
                       <Badge variant="neutral">{a.period}</Badge>
                     </div>
-                    <p className="mt-0.5 text-xs leading-relaxed text-muted">{a.description}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                      {a.template
+                        ? tD(a.template, translateParams(a.params, d), a.description)
+                        : a.description}
+                    </p>
                   </div>
                   <Badge variant={SEV_VARIANT[a.severity] ?? "neutral"}>{a.z}σ</Badge>
                 </li>

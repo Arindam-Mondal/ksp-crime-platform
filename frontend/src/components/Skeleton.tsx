@@ -1,12 +1,22 @@
-export function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={`skeleton rounded-lg ${className}`} />;
+import { CSSProperties } from "react";
+
+export function Skeleton({
+  className = "",
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return <div className={`skeleton rounded-lg ${className}`} style={style} />;
 }
 
 // Loading placeholder shaped like a bar chart (rising bars).
-export function ChartSkeleton({ height = 300 }: { height?: number }) {
+// Fills its container by default so it matches responsive chart frames; pass an
+// explicit height only where there is no sized parent.
+export function ChartSkeleton({ height }: { height?: number }) {
   const bars = [40, 65, 50, 80, 55, 72, 48, 90, 60, 70, 45, 85];
   return (
-    <div className="flex items-end gap-2" style={{ height }}>
+    <div className="flex h-full items-end gap-2" style={height ? { height } : undefined}>
       {bars.map((h, i) => (
         <div
           key={i}

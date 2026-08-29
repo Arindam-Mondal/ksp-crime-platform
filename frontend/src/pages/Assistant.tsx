@@ -6,16 +6,21 @@ import Panel from "../components/Panel";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
 import Badge from "../components/Badge";
+import { useLang, useT, type TranslationKey } from "../i18n";
 
-const EXAMPLES = [
-  "Which districts have rising chain snatching?",
-  "Summarise the top crime hotspots this quarter.",
-  "Which repeat offenders are most connected?",
+const EXAMPLE_KEYS: TranslationKey[] = [
+  "assistant.example1",
+  "assistant.example2",
+  "assistant.example3",
 ];
 
 export default function Assistant() {
   const [question, setQuestion] = useState("");
-  const ask = useMutation<AskResponse, Error, string>({ mutationFn: (q) => api.ask(q) });
+  const t = useT();
+  const { lang } = useLang();
+  // The answer is generated, not cached — asking again after a language switch is a
+  // fresh call by design, and `lang` rides along so the model replies in Kannada.
+  const ask = useMutation<AskResponse, Error, string>({ mutationFn: (q) => api.ask(q, lang) });
 
   const submit = (q: string) => {
     const trimmed = q.trim();
@@ -26,12 +31,12 @@ export default function Assistant() {
     <div className="space-y-7">
       <PageHeader
         icon={Sparkles}
-        eyebrow="Natural-Language Intelligence"
-        title="Ask the Data"
-        subtitle="Query incidents in plain language — grounded on retrieved case records (QuickML RAG when configured, keyword retrieval otherwise)"
+        eyebrow={t("assistant.eyebrow")}
+        title={t("assistant.title")}
+        subtitle={t("assistant.subtitle")}
       />
 
-      <Panel icon={MessageSquareText} title="Conversational query">
+      <Panel icon={MessageSquareText} title={t("assistant.panel")}>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -39,22 +44,29 @@ export default function Assistant() {
           }}
           className="flex gap-2.5"
         >
-          <div className="relative flex-1">
+          {/* min-w-0: flex items default to min-width:auto, and an <input>'s
+              intrinsic size would push the button off a 375px screen */}
+          <div className="relative min-w-0 flex-1">
             <Sparkles size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-accent-soft" />
             <input
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Ask about districts, hotspots, offenders, trends…"
+              placeholder={t("assistant.placeholder")}
               className="w-full rounded-xl border border-line bg-bg/60 py-3 pl-10 pr-3 text-sm text-white/90 outline-none transition-colors placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
           </div>
           <button
             type="submit"
             disabled={ask.isPending || !question.trim()}
-            className="inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white shadow-glow transition-all hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white shadow-glow transition-all hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
           >
             {ask.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-            {ask.isPending ? "Asking…" : "Ask"}
+            <span className="hidden sm:inline">
+              {ask.isPending ? t("assistant.asking") : t("assistant.ask")}
+            </span>
+            <span className="sr-only sm:hidden">
+              {ask.isPending ? t("assistant.asking") : t("assistant.ask")}
+            </span>
           </button>
         </form>
 
@@ -63,22 +75,25 @@ export default function Assistant() {
           <div className="mt-5">
             <EmptyState
               icon={MessageSquareText}
-              title="Start a conversation with the data"
-              hint="Ask in natural language. Answers are grounded on precomputed aggregates — try one of these:"
+              title={t("assistant.emptyTitle")}
+              hint={t("assistant.emptyHint")}
             >
               <div className="flex flex-wrap justify-center gap-2">
-                {EXAMPLES.map((ex) => (
-                  <button
-                    key={ex}
-                    onClick={() => {
-                      setQuestion(ex);
-                      submit(ex);
-                    }}
-                    className="rounded-full border border-line bg-surface-2/60 px-3.5 py-1.5 text-xs text-white/80 transition-all hover:border-accent/40 hover:text-white"
-                  >
-                    {ex}
-                  </button>
-                ))}
+                {EXAMPLE_KEYS.map((key) => {
+                  const ex = t(key);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setQuestion(ex);
+                        submit(ex);
+                      }}
+                      className="rounded-full border border-line bg-surface-2/60 px-3.5 py-1.5 text-xs text-white/80 transition-all hover:border-accent/40 hover:text-white"
+                    >
+                      {ex}
+                    </button>
+                  );
+                })}
               </div>
             </EmptyState>
           </div>
@@ -87,7 +102,7 @@ export default function Assistant() {
         {ask.isPending && (
           <div className="mt-5 flex items-center gap-3 rounded-xl border border-line bg-surface-2/40 px-4 py-4 text-sm text-muted">
             <Loader2 size={16} className="animate-spin text-accent-soft" />
-            Analysing aggregates and composing a grounded answer…
+            {t("assistant.thinking")}
           </div>
         )}
 
@@ -99,14 +114,14 @@ export default function Assistant() {
                 <Badge variant="accent" dot>
                   {ask.data.provider}
                 </Badge>
-                <Badge variant="neutral">model · {ask.data.model}</Badge>
+                <Badge variant="neutral">{t("assistant.model", { model: ask.data.model })}</Badge>
               </div>
             </div>
 
             {ask.data.grounded_on.length > 0 && (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted">
-                  <FileText size={13} /> Grounded on
+                  <FileText size={13} /> {t("assistant.groundedOn")}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {ask.data.grounded_on.map((g, i) => (
