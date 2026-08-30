@@ -213,6 +213,7 @@ const KN: Record<LabelKind, Record<string, string>> = {
   /** Also covers the risk tiers, which share the High / Medium / Low vocabulary. */
   severity: {
     Critical: "ಗಂಭೀರ",
+    Elevated: "ಏರಿಕೆ",
     High: "ಹೆಚ್ಚು",
     Medium: "ಮಧ್ಯಮ",
     Low: "ಕಡಿಮೆ",
@@ -228,6 +229,9 @@ const KN: Record<LabelKind, Record<string, string>> = {
     "Assistant Sub-Inspector": "ಸಹಾಯಕ ಉಪ-ನಿರೀಕ್ಷಕರು",
     "Head Constable": "ಮುಖ್ಯ ಪೇದೆ",
     "Police Constable": "ಪೊಲೀಸ್ ಪೇದೆ",
+    "Commissioner of Police": "ಪೊಲೀಸ್ ಆಯುಕ್ತರು",
+    "Deputy Commissioner of Police": "ಪೊಲೀಸ್ ಉಪ ಆಯುಕ್ತರು",
+    "Assistant Commissioner of Police": "ಸಹಾಯಕ ಪೊಲೀಸ್ ಆಯುಕ್ತರು",
   },
 
   designation: {
@@ -237,6 +241,9 @@ const KN: Record<LabelKind, Record<string, string>> = {
     "Superintendent of Police": "ಪೊಲೀಸ್ ವರಿಷ್ಠಾಧಿಕಾರಿ",
     "Station Writer": "ಠಾಣಾ ಬರಹಗಾರ",
     "Beat Constable": "ಬೀಟ್ ಪೇದೆ",
+    "Commissioner of Police": "ಪೊಲೀಸ್ ಆಯುಕ್ತರು",
+    "Deputy Commissioner of Police": "ಪೊಲೀಸ್ ಉಪ ಆಯುಕ್ತರು",
+    "Sub-Divisional Police Officer": "ಉಪ-ವಿಭಾಗೀಯ ಪೊಲೀಸ್ ಅಧಿಕಾರಿ",
   },
 
   urbanisation: {

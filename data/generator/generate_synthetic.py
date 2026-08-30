@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import collections
 import csv
+import math
 import os
 import random
 from datetime import datetime, timedelta
@@ -86,21 +88,301 @@ NEIGHBOUR_STATES = [
 ]
 
 ARCHETYPE_PROPENSITY = {"metro": 1.9, "urban": 1.25, "semiurban": 1.0, "rural": 0.62, "border": 1.05}
-N_STATIONS = {"metro": 14, "urban": 8, "semiurban": 6, "rural": 4, "border": 6}
 N_HOTCELLS = {"metro": 5, "urban": 3, "semiurban": 3, "rural": 2, "border": 3}
+
+# Police station roster: district -> [(station name, lat, lon, load weight)].
+# Names are the real KSP station rosters; coordinates are the station locality. The load
+# weight sets relative case volume — a city-market or bus-stand station books many times
+# what a peri-urban station does, which is what makes the hotspot layer look like a real
+# jurisdiction rather than a uniform blob.
+KA_STATIONS = {
+    "Bengaluru City": [
+        ("Cubbon Park PS", 12.9763, 77.5929, 1.0), ("Vidhana Soudha PS", 12.9794, 77.5912, 0.7),
+        ("High Grounds PS", 12.9878, 77.5905, 0.9), ("Sadashivanagar PS", 13.0068, 77.5806, 0.8),
+        ("Shivajinagar PS", 12.9850, 77.6050, 1.5), ("Commercial Street PS", 12.9827, 77.6091, 1.4),
+        ("Halasuru Gate PS", 12.9718, 77.5990, 1.3), ("Ashok Nagar PS", 12.9698, 77.6031, 1.2),
+        ("J.C. Nagar PS", 13.0056, 77.5960, 1.1), ("Bharathi Nagar PS", 12.9853, 77.6156, 1.2),
+        ("Halasuru PS", 12.9770, 77.6260, 1.0), ("Indiranagar PS", 12.9719, 77.6412, 1.2),
+        ("Jeevan Bhima Nagar PS", 12.9628, 77.6570, 1.0), ("Banaswadi PS", 13.0139, 77.6510, 1.1),
+        ("Ramamurthy Nagar PS", 13.0158, 77.6780, 1.1), ("K.R. Puram PS", 13.0080, 77.6950, 1.3),
+        ("Whitefield PS", 12.9698, 77.7500, 1.4), ("Marathahalli PS", 12.9591, 77.6974, 1.3),
+        ("HAL PS", 12.9600, 77.6480, 0.9), ("Mahadevapura PS", 12.9910, 77.6970, 1.2),
+        ("Bellandur PS", 12.9260, 77.6760, 1.1), ("Varthur PS", 12.9400, 77.7480, 0.9),
+        ("Kadugodi PS", 12.9950, 77.7580, 1.0), ("Vibhutipura PS", 12.9700, 77.6700, 0.9),
+        ("Koramangala PS", 12.9352, 77.6245, 1.3), ("Madiwala PS", 12.9220, 77.6180, 1.3),
+        ("Adugodi PS", 12.9430, 77.6100, 1.0), ("Wilson Garden PS", 12.9480, 77.5950, 1.0),
+        ("Tilak Nagar PS", 12.9330, 77.5900, 0.9), ("Viveknagar PS", 12.9500, 77.6180, 1.0),
+        ("Jayanagar PS", 12.9250, 77.5830, 1.1), ("Siddapura PS", 12.9420, 77.5750, 1.0),
+        ("Banashankari PS", 12.9250, 77.5470, 1.2), ("Girinagar PS", 12.9430, 77.5450, 0.9),
+        ("Kumaraswamy Layout PS", 12.9080, 77.5560, 1.0), ("Konanakunte PS", 12.8850, 77.5620, 0.9),
+        ("Hulimavu PS", 12.8790, 77.5990, 1.0), ("Bannerughatta PS", 12.8000, 77.5770, 0.8),
+        ("Puttenahalli PS", 12.8900, 77.5850, 0.9), ("J.P. Nagar PS", 12.9080, 77.5850, 1.1),
+        ("Basavanagudi PS", 12.9420, 77.5730, 1.0), ("Hanumanthanagar PS", 12.9440, 77.5560, 0.9),
+        ("Chamrajpet PS", 12.9600, 77.5650, 1.0), ("V.V. Puram PS", 12.9530, 77.5760, 0.9),
+        ("Cottonpet PS", 12.9660, 77.5760, 1.2), ("Chickpet PS", 12.9690, 77.5790, 1.3),
+        ("Upparpet PS", 12.9760, 77.5730, 1.4), ("Kalasipalyam PS", 12.9620, 77.5760, 1.2),
+        ("Byatarayanapura PS", 13.0620, 77.5900, 1.0), ("Yelahanka PS", 13.1000, 77.5960, 1.1),
+        ("Yeshwanthpur PS", 13.0230, 77.5500, 1.2), ("Rajajinagar PS", 12.9900, 77.5520, 1.1),
+        ("Basaveshwaranagar PS", 12.9880, 77.5350, 1.0), ("Kamakshipalya PS", 12.9760, 77.5250, 1.1),
+        ("Magadi Road PS", 12.9740, 77.5480, 1.1), ("Vijayanagar PS", 12.9720, 77.5300, 1.1),
+        ("Govindarajanagar PS", 12.9660, 77.5220, 1.0), ("Annapoorneshwari Nagar PS", 12.9450, 77.4980, 0.9),
+        ("Nandini Layout PS", 13.0080, 77.5400, 1.0), ("Peenya PS", 13.0290, 77.5170, 1.1),
+        ("Bagalagunte PS", 13.0470, 77.5230, 0.9), ("Hebbal PS", 13.0350, 77.5920, 1.1),
+        ("R.T. Nagar PS", 13.0200, 77.5940, 1.0), ("Sanjay Nagar PS", 13.0300, 77.5800, 0.9),
+        ("Malleswaram PS", 13.0030, 77.5700, 1.0), ("Subramanyanagar PS", 13.0000, 77.5540, 0.9),
+        ("Kengeri PS", 12.9160, 77.4820, 1.0), ("Jnanabharathi PS", 12.9400, 77.5100, 0.9),
+        ("Rajarajeshwari Nagar PS", 12.9270, 77.5190, 1.1), ("Subramanyapura PS", 12.9010, 77.5420, 0.9),
+        ("Electronic City PS", 12.8450, 77.6600, 1.2), ("Bommanahalli PS", 12.9000, 77.6200, 1.1),
+        ("Begur PS", 12.8720, 77.6200, 0.9), ("Parappana Agrahara PS", 12.8600, 77.6500, 0.9),
+        ("Seshadripuram PS", 12.9930, 77.5760, 1.0), ("Gandhinagar PS", 12.9780, 77.5800, 1.3),
+    ],
+    "Bengaluru Rural": [
+        ("Devanahalli PS", 13.2437, 77.7118, 1.0), ("Doddaballapura Town PS", 13.2257, 77.5378, 1.1),
+        ("Doddaballapura Rural PS", 13.2600, 77.5600, 0.7), ("Nelamangala PS", 13.0997, 77.3940, 1.0),
+        ("Hoskote PS", 13.0707, 77.7980, 1.1), ("Vijayapura (B.R.) PS", 13.3200, 77.7900, 0.7),
+        ("Anekal PS", 12.7110, 77.6960, 1.0), ("Attibele PS", 12.7830, 77.7730, 0.9),
+        ("Jigani PS", 12.7830, 77.6400, 0.8), ("KIAL Airport PS", 13.1986, 77.7066, 0.8),
+    ],
+    "Mysuru": [
+        ("Devaraja PS", 12.3090, 76.6540, 1.3), ("Lashkar PS", 12.3070, 76.6480, 1.1),
+        ("Krishnaraja PS", 12.3020, 76.6390, 1.2), ("Narasimharaja PS", 12.3010, 76.6600, 1.2),
+        ("Nazarbad PS", 12.3050, 76.6690, 1.0), ("Vidyaranyapuram PS", 12.2830, 76.6420, 1.0),
+        ("Kuvempunagar PS", 12.2880, 76.6150, 1.0), ("Jayalakshmipuram PS", 12.3130, 76.6210, 0.9),
+        ("Ashokapuram PS", 12.2930, 76.6520, 0.9), ("Metagalli PS", 12.3400, 76.6120, 0.9),
+        ("Udayagiri PS", 12.2960, 76.6740, 1.1), ("Saraswathipuram PS", 12.3090, 76.6280, 0.9),
+        ("Hunsur PS", 12.3040, 76.2930, 0.9), ("Nanjangud Town PS", 12.1200, 76.6830, 0.9),
+        ("T. Narasipura PS", 12.2050, 76.8990, 0.8), ("Periyapatna PS", 12.3350, 76.0980, 0.7),
+        ("H.D. Kote PS", 12.0930, 76.3480, 0.7),
+    ],
+    "Mandya": [
+        ("Mandya Town PS", 12.5230, 76.8960, 1.2), ("Mandya Rural PS", 12.5400, 76.9100, 0.8),
+        ("Maddur PS", 12.5850, 77.0450, 1.0), ("Malavalli PS", 12.3830, 77.0620, 0.9),
+        ("Srirangapatna PS", 12.4180, 76.6940, 1.0), ("Pandavapura PS", 12.5020, 76.6650, 0.8),
+        ("K.R. Pete PS", 12.6660, 76.4870, 0.8), ("Nagamangala PS", 12.8180, 76.7550, 0.7),
+        ("Bharathinagara PS", 12.6300, 77.0100, 0.7),
+    ],
+    "Hassan": [
+        ("Hassan Town PS", 13.0050, 76.0990, 1.2), ("Hassan Rural PS", 13.0200, 76.1200, 0.8),
+        ("Arsikere PS", 13.3140, 76.2570, 1.0), ("Channarayapatna PS", 12.9070, 76.3880, 0.9),
+        ("Holenarsipura PS", 12.7870, 76.2440, 0.8), ("Sakleshpur PS", 12.9420, 75.7860, 0.9),
+        ("Belur PS", 13.1650, 75.8630, 0.8), ("Alur PS", 12.9840, 75.9500, 0.6),
+        ("Arakalgud PS", 12.7620, 76.0570, 0.7),
+    ],
+    "Tumakuru": [
+        ("Tumakuru Town PS", 13.3400, 77.1010, 1.3), ("Kyathsandra PS", 13.3700, 77.1200, 0.9),
+        ("Upparahalli PS", 13.3300, 77.0900, 0.9), ("Batawadi PS", 13.3200, 77.1200, 0.8),
+        ("Tiptur PS", 13.2560, 76.4770, 1.0), ("Sira PS", 13.7410, 76.9040, 0.9),
+        ("Madhugiri PS", 13.6620, 77.2100, 0.8), ("Kunigal PS", 13.0230, 77.0250, 0.8),
+        ("Gubbi PS", 13.3120, 76.9400, 0.7), ("Koratagere PS", 13.5220, 77.2380, 0.6),
+    ],
+    "Kolar": [
+        ("Kolar Town PS", 13.1360, 78.1330, 1.2), ("Kolar Rural PS", 13.1500, 78.1500, 0.8),
+        ("Kolar Gold Fields PS", 12.9560, 78.2740, 1.1), ("Bangarpet PS", 12.9910, 78.1780, 0.9),
+        ("Malur PS", 13.0040, 77.9370, 0.9), ("Mulbagal PS", 13.1640, 78.3930, 0.8),
+        ("Srinivaspur PS", 13.3400, 78.2100, 0.7), ("Robertsonpet PS", 12.9560, 78.2800, 1.0),
+    ],
+    "Chikkaballapur": [
+        ("Chikkaballapur Town PS", 13.4350, 77.7310, 1.1), ("Chintamani PS", 13.4000, 78.0530, 1.0),
+        ("Gauribidanur PS", 13.6070, 77.5150, 0.9), ("Sidlaghatta PS", 13.3900, 77.8640, 0.8),
+        ("Bagepalli PS", 13.7830, 77.7950, 0.7), ("Gudibande PS", 13.6720, 77.7080, 0.6),
+        ("Nandi Hills PS", 13.3700, 77.6830, 0.7),
+    ],
+    "Ramanagara": [
+        ("Ramanagara Town PS", 12.7110, 77.2810, 1.1), ("Channapatna Town PS", 12.6510, 77.2060, 1.0),
+        ("Magadi PS", 12.9570, 77.2260, 0.8), ("Kanakapura Town PS", 12.5460, 77.4200, 1.0),
+        ("Bidadi PS", 12.7990, 77.3860, 0.9), ("Harohalli PS", 12.6600, 77.4600, 0.7),
+        ("Sathanur PS", 12.4600, 77.3600, 0.6),
+    ],
+    "Chamarajanagar": [
+        ("Chamarajanagar Town PS", 11.9260, 76.9440, 1.1), ("Gundlupet PS", 11.8110, 76.6900, 0.9),
+        ("Kollegal PS", 12.1540, 77.1100, 1.0), ("Yelandur PS", 12.0490, 77.0300, 0.7),
+        ("Hanur PS", 12.1000, 77.2700, 0.7), ("Male Mahadeshwara Hills PS", 11.9800, 77.5800, 0.6),
+    ],
+    "Chitradurga": [
+        ("Chitradurga Town PS", 14.2250, 76.3980, 1.2), ("Chitradurga Rural PS", 14.2400, 76.4200, 0.8),
+        ("Hiriyur PS", 13.9450, 76.6180, 0.9), ("Challakere PS", 14.3170, 76.6520, 0.9),
+        ("Hosadurga PS", 13.7960, 76.2760, 0.8), ("Holalkere PS", 14.0430, 76.1850, 0.7),
+        ("Molakalmuru PS", 14.7180, 76.7420, 0.6), ("Bharamasagara PS", 14.1500, 76.4500, 0.6),
+    ],
+    "Davanagere": [
+        ("Davanagere Town PS", 14.4640, 75.9220, 1.3), ("Vidyanagar PS", 14.4500, 75.9100, 1.0),
+        ("Azad Nagar PS", 14.4700, 75.9300, 1.0), ("Doddapete PS", 14.4600, 75.9200, 1.1),
+        ("K.T.J. Nagar PS", 14.4550, 75.9350, 0.9), ("Harihara PS", 14.5130, 75.8050, 1.0),
+        ("Channagiri PS", 14.0240, 75.9250, 0.8), ("Honnali PS", 14.2400, 75.6470, 0.7),
+        ("Jagalur PS", 14.5200, 76.1400, 0.6),
+    ],
+    "Shivamogga": [
+        ("Doddapete PS (Shivamogga)", 13.9290, 75.5680, 1.2), ("Kote PS", 13.9330, 75.5700, 1.1),
+        ("Tunganagar PS", 13.9400, 75.5600, 1.0), ("Vinobanagar PS", 13.9200, 75.5750, 1.0),
+        ("Jayanagar PS (Shivamogga)", 13.9250, 75.5620, 0.9), ("Bhadravathi Town PS", 13.8480, 75.7050, 1.0),
+        ("Sagara PS", 14.1660, 75.0330, 0.9), ("Shikaripura PS", 14.2680, 75.3540, 0.8),
+        ("Sorab PS", 14.3800, 75.0920, 0.7), ("Thirthahalli PS", 13.6880, 75.2440, 0.7),
+    ],
+    "Chikkamagaluru": [
+        ("Chikkamagaluru Town PS", 13.3160, 75.7720, 1.1), ("Chikkamagaluru Rural PS", 13.3300, 75.7900, 0.7),
+        ("Kadur PS", 13.5510, 76.0110, 0.9), ("Tarikere PS", 13.7100, 75.8150, 0.8),
+        ("Mudigere PS", 13.1330, 75.6390, 0.7), ("Koppa PS", 13.5320, 75.3550, 0.7),
+        ("Sringeri PS", 13.4180, 75.2520, 0.6), ("N.R. Pura PS", 13.4000, 75.4900, 0.6),
+    ],
+    "Udupi": [
+        ("Udupi Town PS", 13.3410, 74.7420, 1.2), ("Malpe PS", 13.3500, 74.7050, 1.0),
+        ("Manipal PS", 13.3520, 74.7930, 1.0), ("Kaup PS", 13.2200, 74.7500, 0.8),
+        ("Karkala Town PS", 13.2160, 74.9900, 0.9), ("Kundapura PS", 13.6260, 74.6920, 1.0),
+        ("Byndoor PS", 13.8670, 74.6330, 0.7), ("Brahmavar PS", 13.4270, 74.7460, 0.8),
+        ("Hebri PS", 13.4600, 74.9800, 0.6),
+    ],
+    "Dakshina Kannada": [
+        ("Mangaluru North (Barke) PS", 12.8700, 74.8420, 1.3), ("Mangaluru South (Pandeshwar) PS", 12.8600, 74.8390, 1.3),
+        ("Kadri PS", 12.8890, 74.8560, 1.2), ("Kavoor PS", 12.9010, 74.8340, 1.0),
+        ("Urwa PS", 12.8850, 74.8420, 1.0), ("Panambur PS", 12.9400, 74.8100, 0.9),
+        ("Surathkal PS", 12.9930, 74.7940, 1.0), ("Ullal PS", 12.8060, 74.8560, 0.9),
+        ("Konaje PS", 12.8100, 74.9200, 0.8), ("Bantwal Town PS", 12.8900, 75.0350, 0.9),
+        ("Puttur Town PS", 12.7590, 75.2010, 1.0), ("Sullia PS", 12.5600, 75.3870, 0.7),
+        ("Belthangady PS", 12.8700, 75.3000, 0.7), ("Moodabidri PS", 13.0700, 74.9950, 0.8),
+        ("Vittal PS", 12.7600, 75.0900, 0.7),
+    ],
+    "Uttara Kannada": [
+        ("Karwar Town PS", 14.8130, 74.1290, 1.1), ("Ankola PS", 14.6600, 74.3000, 0.8),
+        ("Kumta PS", 14.4260, 74.4160, 0.9), ("Honnavar PS", 14.2810, 74.4450, 0.8),
+        ("Bhatkal PS", 13.9850, 74.5550, 1.0), ("Sirsi Town PS", 14.6200, 74.8380, 1.0),
+        ("Siddapur PS", 14.3430, 74.8940, 0.7), ("Yellapur PS", 14.9640, 74.7080, 0.7),
+        ("Mundgod PS", 14.9700, 75.0400, 0.7), ("Haliyal PS", 15.3280, 74.7590, 0.8),
+        ("Dandeli PS", 15.2670, 74.6180, 0.9), ("Joida PS", 15.1300, 74.5000, 0.5),
+    ],
+    "Belagavi": [
+        ("Camp PS", 15.8600, 74.5100, 1.2), ("Market PS", 15.8520, 74.5000, 1.3),
+        ("Malmaruti PS", 15.8650, 74.5150, 1.1), ("Khade Bazar PS", 15.8560, 74.5060, 1.2),
+        ("Tilakwadi PS", 15.8400, 74.4980, 1.1), ("Udyambag PS", 15.8200, 74.4900, 1.0),
+        ("APMC PS", 15.8700, 74.5200, 0.9), ("Shahapur PS", 15.8450, 74.5120, 1.0),
+        ("Chikkodi PS", 16.4270, 74.5900, 0.9), ("Gokak PS", 16.1670, 74.8230, 0.9),
+        ("Bailhongal PS", 15.8140, 74.8590, 0.8), ("Ramdurg PS", 15.9500, 75.3000, 0.7),
+        ("Athani PS", 16.7280, 75.0640, 0.8), ("Saundatti PS", 15.7700, 75.1200, 0.7),
+        ("Nippani PS", 16.4000, 74.3800, 0.8),
+    ],
+    "Bagalkot": [
+        ("Bagalkot Town PS", 16.1690, 75.6620, 1.1), ("Navanagar PS", 16.1800, 75.6900, 0.9),
+        ("Badami PS", 15.9150, 75.6800, 0.8), ("Jamkhandi PS", 16.5030, 75.2900, 0.9),
+        ("Mudhol PS", 16.3330, 75.2830, 0.8), ("Bilagi PS", 16.3500, 75.6100, 0.6),
+        ("Hungund PS", 16.0630, 76.0580, 0.7), ("Rabkavi Banhatti PS", 16.4800, 75.1100, 0.7),
+    ],
+    "Vijayapura": [
+        ("Vijayapura Town PS", 16.8300, 75.7100, 1.2), ("Gandhi Chowk PS", 16.8250, 75.7150, 1.1),
+        ("Adarsh Nagar PS", 16.8400, 75.7200, 1.0), ("Jalanagar PS", 16.8200, 75.7000, 0.9),
+        ("Indi PS", 17.1770, 75.9500, 0.8), ("Sindagi PS", 16.9200, 76.2350, 0.8),
+        ("Basavana Bagewadi PS", 16.5720, 75.9700, 0.7), ("Muddebihal PS", 16.3380, 76.1300, 0.7),
+        ("Talikota PS", 16.4700, 76.3100, 0.7),
+    ],
+    "Kalaburagi": [
+        ("Station Bazar PS", 17.3350, 76.8400, 1.3), ("Chowk PS", 17.3300, 76.8340, 1.2),
+        ("Brahmapur PS", 17.3260, 76.8300, 1.1), ("Ashok Nagar PS (Kalaburagi)", 17.3400, 76.8250, 1.0),
+        ("Raghavendra Nagar PS", 17.3200, 76.8200, 0.9), ("M.B. Nagar PS", 17.3450, 76.8450, 0.9),
+        ("University PS", 17.3500, 76.8100, 0.8), ("Farhatabad PS", 17.4200, 76.8600, 0.7),
+        ("Sedam PS", 17.1800, 77.2850, 0.8), ("Chittapur PS", 17.1200, 77.0800, 0.7),
+        ("Aland PS", 17.5640, 76.5680, 0.7), ("Jewargi PS", 17.0140, 76.7700, 0.6),
+    ],
+    "Bidar": [
+        ("Bidar Town PS", 17.9130, 77.5300, 1.2), ("Gandhi Gunj PS", 17.9200, 77.5350, 1.1),
+        ("New Town PS", 17.9050, 77.5250, 1.0), ("Basavakalyan PS", 17.8750, 76.9480, 0.9),
+        ("Humnabad PS", 17.7700, 77.1300, 0.8), ("Bhalki PS", 18.0430, 77.2050, 0.8),
+        ("Aurad PS", 18.2560, 77.4160, 0.7), ("Chitguppa PS", 17.6800, 77.1700, 0.6),
+    ],
+    "Raichur": [
+        ("Raichur Town PS", 16.2080, 77.3460, 1.2), ("Market Yard PS", 16.2150, 77.3520, 1.0),
+        ("Sadar Bazar PS", 16.2050, 77.3400, 1.1), ("Netaji Nagar PS", 16.2000, 77.3550, 0.9),
+        ("Sindhanur PS", 15.7680, 76.7580, 0.9), ("Manvi PS", 15.9900, 77.0500, 0.8),
+        ("Devadurga PS", 16.4200, 76.9300, 0.7), ("Lingasugur PS", 16.1580, 76.5200, 0.7),
+    ],
+    "Koppal": [
+        ("Koppal Town PS", 15.3550, 76.1550, 1.1), ("Gangavathi PS", 15.4310, 76.5290, 1.0),
+        ("Yelburga PS", 15.6150, 76.0100, 0.7), ("Kushtagi PS", 15.7560, 76.1900, 0.8),
+        ("Kanakagiri PS", 15.5600, 76.3400, 0.6), ("Munirabad PS", 15.3300, 76.3400, 0.7),
+    ],
+    "Ballari": [
+        ("Ballari Town PS", 15.1390, 76.9210, 1.2), ("Cowl Bazar PS", 15.1450, 76.9250, 1.1),
+        ("Brucepet PS", 15.1500, 76.9300, 1.0), ("Gandhi Nagar PS (Ballari)", 15.1350, 76.9150, 0.9),
+        ("Sanduru PS", 15.0700, 76.5500, 0.8), ("Siruguppa PS", 15.6300, 76.8900, 0.8),
+        ("Kampli PS", 15.4050, 76.6000, 0.7), ("Kurugodu PS", 15.2700, 76.8000, 0.6),
+        ("Moka PS", 15.2000, 76.8500, 0.6),
+    ],
+    "Vijayanagara": [
+        ("Hosapete Town PS", 15.2690, 76.3870, 1.1), ("Hampi PS", 15.3350, 76.4600, 0.8),
+        ("Kottur PS", 15.1600, 76.0700, 0.7), ("Harapanahalli PS", 14.7900, 75.9900, 0.8),
+        ("Hagaribommanahalli PS", 15.0400, 76.2000, 0.7), ("Huvina Hadagali PS", 15.0400, 75.9500, 0.6),
+    ],
+    "Yadgir": [
+        ("Yadgir Town PS", 16.7700, 77.1380, 1.1), ("Shahapur PS (Yadgir)", 16.6980, 76.8400, 0.9),
+        ("Surapura PS", 16.5150, 76.7570, 0.8), ("Gurmitkal PS", 16.8600, 77.3900, 0.7),
+        ("Wadgera PS", 16.6800, 77.0500, 0.6),
+    ],
+    "Gadag": [
+        ("Gadag Town PS", 15.4310, 75.6360, 1.1), ("Betageri PS", 15.4400, 75.6300, 0.9),
+        ("Ron PS", 15.6950, 75.7350, 0.8), ("Naragund PS", 15.7250, 75.3900, 0.7),
+        ("Mundargi PS", 15.2050, 75.8800, 0.7), ("Shirahatti PS", 15.2300, 75.5800, 0.6),
+    ],
+    "Haveri": [
+        ("Haveri Town PS", 14.7950, 75.4040, 1.1), ("Ranebennur Town PS", 14.6220, 75.6290, 1.0),
+        ("Byadgi PS", 14.6720, 75.4870, 0.8), ("Hirekerur PS", 14.4530, 75.3950, 0.7),
+        ("Savanur PS", 14.9700, 75.3350, 0.7), ("Shiggaon PS", 14.9900, 75.2200, 0.7),
+        ("Hangal PS", 14.7640, 75.1230, 0.7),
+    ],
+    "Dharwad": [
+        ("Vidyanagar PS (Hubballi)", 15.3550, 75.1250, 1.3), ("Ashok Nagar PS (Hubballi)", 15.3600, 75.1300, 1.2),
+        ("Gokul Road PS", 15.3800, 75.1000, 1.1), ("Old Hubballi PS", 15.3450, 75.1400, 1.2),
+        ("Bendigeri PS", 15.3500, 75.1350, 1.0), ("Ghantikeri PS", 15.3520, 75.1450, 1.0),
+        ("Keshwapur PS", 15.3700, 75.1200, 1.0), ("Dharwad Town PS", 15.4590, 75.0080, 1.1),
+        ("Dharwad Sub-urban PS", 15.4700, 75.0200, 0.8), ("Vidyagiri PS", 15.4500, 75.0150, 0.9),
+        ("Kelageri PS", 15.4400, 74.9900, 0.7), ("Navanagar PS (Hubballi)", 15.3900, 75.1100, 0.9),
+        ("Kalghatgi PS", 15.1800, 74.9700, 0.6), ("Kundgol PS", 15.2560, 75.2470, 0.6),
+    ],
+    "Kodagu": [
+        ("Madikeri Town PS", 12.4240, 75.7380, 1.1), ("Virajpet PS", 12.1970, 75.8050, 0.9),
+        ("Somwarpet PS", 12.5960, 75.8500, 0.8), ("Kushalnagar PS", 12.4570, 75.9600, 0.9),
+        ("Gonikoppal PS", 12.2100, 75.9100, 0.7), ("Ponnampet PS", 12.1400, 75.9400, 0.6),
+        ("Napoklu PS", 12.3600, 75.6700, 0.6),
+    ],
+}
 
 # ============================================================ legal layer ====
 # Act master: ActCode (PK, VARCHAR), description, short name.
 ACTS = [
+    # The 2023 codes replaced the colonial trio with effect from 01-07-2024. Both eras stay
+    # Active: an offence is charged under the law in force on the date it was COMMITTED, so
+    # FIRs for pre-cutover incidents continue to cite IPC/CrPC long after the changeover.
+    ("BNS",   "Bharatiya Nyaya Sanhita, 2023",                  "BNS"),
+    ("BNSS",  "Bharatiya Nagarik Suraksha Sanhita, 2023",       "BNSS"),
+    ("BSA",   "Bharatiya Sakshya Adhiniyam, 2023",              "BSA"),
     ("IPC",   "Indian Penal Code, 1860",                        "IPC"),
+    ("CRPC",  "Code of Criminal Procedure, 1973",               "CrPC"),
     ("ITACT", "Information Technology Act, 2000",               "IT Act"),
     ("NDPS",  "Narcotic Drugs and Psychotropic Substances Act, 1985", "NDPS Act"),
     ("ARMS",  "Arms Act, 1959",                                 "Arms Act"),
     ("KPACT", "Karnataka Police Act, 1963",                     "KP Act"),
     ("DPACT", "Dowry Prohibition Act, 1961",                    "DP Act"),
-    ("CRPC",  "Code of Criminal Procedure, 1973",               "CrPC"),
     ("MVACT", "Motor Vehicles Act, 1988",                       "MV Act"),
+    ("POCSO", "Protection of Children from Sexual Offences Act, 2012", "POCSO Act"),
+    ("SCST",  "Scheduled Castes and Scheduled Tribes (Prevention of Atrocities) Act, 1989",
+              "SC/ST (PoA) Act"),
+    ("KEACT", "Karnataka Excise Act, 1965",                     "KE Act"),
+    ("PCACT", "Prevention of Corruption Act, 1988",             "PC Act"),
+    ("JJACT", "Juvenile Justice (Care and Protection of Children) Act, 2015", "JJ Act"),
 ]
+
+# The 2023 codes came into force on 01-07-2024. Offences committed on/after this date are
+# charged under BNS/BNSS; earlier ones stay under IPC/CrPC. See era_sections().
+BNS_CUTOVER = datetime(2024, 7, 1)
+
+# IPC section -> BNS equivalent. Mapping follows the concordance published with the new code.
+IPC_TO_BNS = {
+    "34": "3(5)", "143": "189(2)", "147": "191(2)", "148": "191(3)", "149": "190",
+    "279": "281", "302": "103(1)", "307": "109", "323": "115(2)", "324": "118(1)",
+    "326": "118(2)", "337": "125(a)", "354": "74", "363": "137(2)", "379": "303(2)",
+    "380": "305(a)", "384": "308(2)", "392": "309(4)", "395": "310(2)", "406": "316(2)",
+    "420": "318(4)", "457": "331(4)", "498A": "85", "506": "351(2)",
+    # BNS created a dedicated snatching offence; under the IPC this was charged as
+    # theft (379) read with assault-in-attempt-to-commit-theft (356).
+    "356": "304(2)",
+}
+CRPC_TO_BNSS = {"174": "194"}
 
 # Section master: (ActCode, SectionCode, SectionDescription)
 SECTIONS = [
@@ -146,6 +428,43 @@ SECTIONS = [
     ("DPACT", "4",  "Penalty for demanding dowry"),
     ("CRPC", "174", "Police to enquire and report on unnatural death"),
     ("MVACT", "184", "Driving dangerously"),
+    # --- Bharatiya Nyaya Sanhita, 2023 (in force 01-07-2024) ---
+    ("BNS", "3(5)",   "Acts done by several persons in furtherance of common intention"),
+    ("BNS", "74",     "Assault or criminal force to woman with intent to outrage modesty"),
+    ("BNS", "85",     "Cruelty by husband or relative of husband"),
+    ("BNS", "103(1)", "Murder"),
+    ("BNS", "109",    "Attempt to murder"),
+    ("BNS", "115(2)", "Voluntarily causing hurt"),
+    ("BNS", "118(1)", "Voluntarily causing hurt by dangerous weapons or means"),
+    ("BNS", "118(2)", "Voluntarily causing grievous hurt by dangerous weapons or means"),
+    ("BNS", "125(a)", "Act endangering life or personal safety of others"),
+    ("BNS", "137(2)", "Kidnapping"),
+    ("BNS", "189(2)", "Being a member of an unlawful assembly"),
+    ("BNS", "190",    "Every member of unlawful assembly guilty of offence committed in prosecution of common object"),
+    ("BNS", "191(2)", "Rioting"),
+    ("BNS", "191(3)", "Rioting, armed with deadly weapon"),
+    ("BNS", "281",    "Rash driving or riding on a public way"),
+    ("BNS", "303(2)", "Theft"),
+    ("BNS", "304(2)", "Snatching"),
+    ("BNS", "305(a)", "Theft in a dwelling house"),
+    ("BNS", "308(2)", "Extortion"),
+    ("BNS", "309(4)", "Robbery"),
+    ("BNS", "310(2)", "Dacoity"),
+    ("BNS", "316(2)", "Criminal breach of trust"),
+    ("BNS", "318(4)", "Cheating and dishonestly inducing delivery of property"),
+    ("BNS", "331(4)", "House-trespass by night after preparation for hurt"),
+    ("BNS", "351(2)", "Criminal intimidation"),
+    # --- Bharatiya Nagarik Suraksha Sanhita, 2023 ---
+    ("BNSS", "194", "Police to enquire and report on suicide or unnatural death"),
+    # --- special and local laws ---
+    ("POCSO", "8",       "Punishment for sexual assault on a child"),
+    ("POCSO", "12",      "Punishment for sexual harassment of a child"),
+    ("SCST",  "3(1)(r)", "Intentional insult or intimidation with intent to humiliate a member of SC/ST"),
+    ("SCST",  "3(1)(s)", "Abuse by caste name in any place within public view"),
+    ("KEACT", "32",      "Unlawful import, export, transport or possession of liquor"),
+    ("KEACT", "34",      "Unlawful manufacture or sale of intoxicant"),
+    ("PCACT", "7",       "Public servant taking gratification other than legal remuneration"),
+    ("JJACT", "75",      "Punishment for cruelty to a child"),
 ]
 
 # Crime heads (CrimeHeadID, CrimeGroupName)
@@ -359,6 +678,8 @@ OCCUPATIONS = [
 ]
 OCCUPATION_W = [16, 14, 16, 6, 12, 9, 10, 5, 5, 4, 2, 1]
 
+ROMAN = ["I", "II", "III", "IV", "V", "VI"]
+
 UNIT_TYPES = [
     (1, "State Police Headquarters", "State", 1),
     (2, "District Police Office",    "District", 2),
@@ -370,26 +691,98 @@ RANKS = [
     (3, "Superintendent of Police", 3), (4, "Deputy Superintendent of Police", 4),
     (5, "Police Inspector", 5), (6, "Police Sub-Inspector", 6),
     (7, "Assistant Sub-Inspector", 7), (8, "Head Constable", 8), (9, "Police Constable", 9),
+    # Commissionerate ladder — the cities are policed by a Commissioner, not an SP.
+    (10, "Commissioner of Police", 2), (11, "Deputy Commissioner of Police", 3),
+    (12, "Assistant Commissioner of Police", 4),
 ]
 DESIGNATIONS = [
     (1, "Station House Officer", 1), (2, "Investigating Officer", 2),
     (3, "Circle Inspector", 3), (4, "Superintendent of Police", 4),
     (5, "Station Writer", 5), (6, "Beat Constable", 6),
+    (7, "Commissioner of Police", 7), (8, "Deputy Commissioner of Police", 8),
+    (9, "Sub-Divisional Police Officer", 9),
 ]
 
-FIRST_NAMES_M = ["Ravi", "Suresh", "Kiran", "Anil", "Naveen", "Prakash", "Mahesh", "Vijay",
-                 "Ramesh", "Arun", "Sunil", "Pavan", "Harish", "Girish", "Santosh", "Madhu",
-                 "Vasanth", "Yogesh", "Chetan", "Praveen", "Manjunath", "Nagaraj", "Basavaraj",
-                 "Imran", "Abdul", "Salman", "Joseph", "Anthony", "Umesh", "Lokesh", "Raghavendra",
-                 "Shivakumar", "Venkatesh", "Srinivas", "Dinesh", "Gopal", "Krishna", "Mohan"]
-FIRST_NAMES_F = ["Deepa", "Lakshmi", "Shilpa", "Geeta", "Roopa", "Nanda", "Bhavana", "Uma",
-                 "Divya", "Anita", "Kavya", "Pooja", "Sushma", "Rekha", "Vidya", "Asha",
-                 "Sneha", "Mamata", "Jyothi", "Sahana", "Fathima", "Ayesha", "Mary", "Sunitha",
-                 "Radha", "Savitha", "Meena", "Padma", "Shobha", "Vani"]
-LAST_NAMES = ["Gowda", "Shetty", "Rao", "Reddy", "Patil", "Kumar", "Hegde", "Naik",
-              "Murthy", "Bhat", "Desai", "Iyer", "Swamy", "Achar", "Pujari", "Kamath",
-              "Kulkarni", "Nayak", "Hiremath", "Joshi", "Angadi", "Banakar", "Khan",
-              "Sheikh", "Dsouza", "Fernandes", "Biradar", "Talwar"]
+# --- names -------------------------------------------------------------------------------
+# Names are drawn community-first, then region-first, so a given name and a surname always
+# come from the same tradition. The old pools crossed them at random and produced people
+# called "Yogesh Sheikh" and "Mary Biradar", which is the first thing a Karnataka reader
+# would notice. Surname geography matters too: Shetty/Poojary/Kamath are coastal, Patil/
+# Biradar/Hiremath are north Karnataka, Gowda/Murthy/Swamy are old Mysuru.
+NAMES = {
+    "hindu": {
+        "m": ["Ravi", "Suresh", "Kiran", "Anil", "Naveen", "Prakash", "Mahesh", "Vijay",
+              "Ramesh", "Arun", "Sunil", "Pavan", "Harish", "Girish", "Santosh", "Madhu",
+              "Vasanth", "Yogesh", "Chetan", "Praveen", "Manjunath", "Nagaraj", "Basavaraj",
+              "Umesh", "Lokesh", "Raghavendra", "Shivakumar", "Venkatesh", "Srinivas",
+              "Dinesh", "Gopal", "Krishna", "Mohan", "Shivanand", "Mallikarjun", "Ningappa",
+              "Siddappa", "Channabasappa", "Veeresh", "Sharanappa", "Gurusiddappa",
+              "Rachappa", "Hanumantha", "Nagendra", "Chandrashekar", "Jagadish", "Ashok",
+              "Vinod", "Rajesh", "Sanjay", "Prashanth", "Shashidhar", "Muniraju",
+              "Byrappa", "Puttaswamy", "Thimmappa", "Eshwarappa", "Devaraj", "Somashekar"],
+        "f": ["Deepa", "Lakshmi", "Shilpa", "Geeta", "Roopa", "Nanda", "Bhavana", "Uma",
+              "Divya", "Anita", "Kavya", "Pooja", "Sushma", "Rekha", "Vidya", "Asha",
+              "Sneha", "Mamata", "Jyothi", "Sahana", "Sunitha", "Radha", "Savitha", "Meena",
+              "Padma", "Shobha", "Vani", "Gangamma", "Renuka", "Parvathi", "Yashoda",
+              "Bhagya", "Nagarathna", "Shanthamma", "Girija", "Sarojamma", "Chandrakala",
+              "Manjula", "Hemalatha", "Pushpa", "Ratnamma", "Sowmya", "Nandini", "Ashwini"],
+    },
+    "muslim": {
+        "m": ["Imran", "Abdul", "Salman", "Mohammed", "Syed", "Riyaz", "Nazeer", "Ilyas",
+              "Rafiq", "Altaf", "Iqbal", "Javed", "Shabbir", "Mushtaq", "Ismail", "Yusuf",
+              "Khaleel", "Sadiq", "Anwar", "Feroz", "Irfan", "Tanveer", "Zakir", "Mehboob"],
+        "f": ["Fathima", "Ayesha", "Rehana", "Nasreen", "Shabana", "Zeenat", "Yasmin",
+              "Rukhsana", "Sameena", "Farida", "Tabassum", "Shaheen", "Asma", "Nazia"],
+    },
+    "christian": {
+        "m": ["Joseph", "Anthony", "Ronald", "Ivan", "Melwyn", "Wilson", "Clifford",
+              "Denzil", "Alwyn", "Vincent", "Lawrence", "Norbert", "Stany", "Rovan"],
+        "f": ["Mary", "Jessy", "Flavia", "Rita", "Sandra", "Melissa", "Anitha", "Sunitha",
+              "Precilla", "Veronica", "Juliana", "Lavina"],
+    },
+}
+SURNAMES = {
+    "hindu": {
+        "coastal": ["Shetty", "Poojary", "Kamath", "Pai", "Bhat", "Acharya", "Shenoy",
+                    "Hegde", "Nayak", "Rao", "Prabhu", "Kini", "Kotian", "Suvarna",
+                    "Devadiga", "Salian", "Karkera", "Amin", "Ballal", "Adyanthaya"],
+        "north": ["Patil", "Biradar", "Hiremath", "Kulkarni", "Desai", "Angadi", "Jadhav",
+                  "Chavan", "Kittur", "Savadi", "Katti", "Math", "Banakar", "Nadgouda",
+                  "Gouda", "Malagi", "Hallikeri", "Yaligar", "Talwar", "Doddamani",
+                  "Mullur", "Sindhur", "Kamble", "Wali", "Hanchinal"],
+        "south": ["Gowda", "Murthy", "Swamy", "Reddy", "Kumar", "Naik", "Shastry",
+                  "Gowdru", "Ningaiah", "Siddaiah", "Krishnappa", "Muniyappa", "Byrappa",
+                  "Lingaiah", "Chandru", "Nanjundaswamy", "Puttaswamy", "Ramaiah",
+                  "Shivanna", "Devaraju", "Mahadevappa", "Basavaraju", "Kempaiah"],
+    },
+    "muslim": {
+        "coastal": ["Sheikh", "Bava", "Hassan", "Kunhi", "Beary", "Ahmed"],
+        "north": ["Nadaf", "Mulla", "Bagwan", "Shaikh", "Jamadar", "Attar", "Bepari",
+                  "Inamdar", "Sanadi", "Killedar", "Pinjar"],
+        "south": ["Khan", "Sheikh", "Syed", "Pasha", "Baig", "Ahmed", "Sharief", "Peer"],
+    },
+    "christian": {
+        "coastal": ["D'Souza", "Fernandes", "Lobo", "Pinto", "Rodrigues", "Menezes",
+                    "Saldanha", "Mascarenhas", "Crasta", "Noronha", "Coelho", "Pais"],
+        "north": ["Fernandes", "Rodrigues", "Pereira", "Gonsalves"],
+        "south": ["Raj", "Thomas", "Peter", "Devadas", "Prakash", "Samuel"],
+    },
+}
+# Region a district's naming tradition belongs to.
+DISTRICT_REGION = {
+    "Udupi": "coastal", "Dakshina Kannada": "coastal", "Uttara Kannada": "coastal",
+    "Belagavi": "north", "Bagalkot": "north", "Vijayapura": "north", "Kalaburagi": "north",
+    "Bidar": "north", "Raichur": "north", "Koppal": "north", "Ballari": "north",
+    "Vijayanagara": "north", "Yadgir": "north", "Gadag": "north", "Haveri": "north",
+    "Dharwad": "north",
+}
+# Community mix by region — coastal Karnataka has a far larger Christian population, and the
+# north-east districts a larger Muslim one, than the state average.
+REGION_COMMUNITY_W = {
+    "coastal": {"hindu": 74, "muslim": 16, "christian": 10},
+    "north":   {"hindu": 79, "muslim": 20, "christian": 1},
+    "south":   {"hindu": 86, "muslim": 11, "christian": 3},
+}
 
 GENDER_M, GENDER_F, GENDER_T = 1, 2, 3
 
@@ -404,21 +797,184 @@ def gauss_pos(rng, mean, sd, lo=0.0):
 
 
 def jitter(value, km, rng):
-    """Offset a coordinate by up to ~km kilometres (1 deg ~= 111 km)."""
+    """Offset a latitude by up to ~km kilometres (1 deg ~= 111 km)."""
     return value + rng.uniform(-km, km) / 111.0
 
 
-def make_name(gender_id, rng, used=None):
-    pool = FIRST_NAMES_F if gender_id == GENDER_F else FIRST_NAMES_M
-    for _ in range(50):
-        name = "{} {} {}".format(rng.choice(pool), rng.choice("ABCDGHKLMNPRSV"),
-                                 rng.choice(LAST_NAMES))
+def scatter(lat, lon, km, rng):
+    """Offset a (lat, lon) pair within ~km kilometres, as a disc rather than a square.
+
+    A degree of longitude shrinks with latitude, so the east-west offset is divided by
+    cos(lat); without that correction clusters come out visibly squashed on the map.
+    """
+    r = km * math.sqrt(rng.random())
+    theta = rng.uniform(0, 2 * math.pi)
+    dlat = (r * math.cos(theta)) / 111.0
+    dlon = (r * math.sin(theta)) / (111.0 * max(0.2, math.cos(math.radians(lat))))
+    return lat + dlat, lon + dlon
+
+
+# Caste distribution conditioned on religion. Drawing the two independently (as before) put
+# Muslim complainants in "General" and Hindu ones in categories that do not apply to them.
+CASTE_BY_RELIGION = {
+    1: [26, 38, 20, 9, 4, 3],   # Hindu
+    2: [4, 70, 1, 1, 19, 5],    # Muslim — overwhelmingly OBC in Karnataka's list
+    3: [18, 30, 16, 3, 28, 5],  # Christian
+}
+CASTE_DEFAULT = [20, 34, 14, 6, 20, 6]
+
+
+def pick_religion(rng, region):
+    """Religion drawn from the region's community mix, not a flat statewide marginal."""
+    community = pick_community(rng, region)
+    if community == "muslim":
+        return 2, community
+    if community == "christian":
+        return 3, community
+    # A small Jain/Sikh/Buddhist tail sits inside the Hindu-majority draw.
+    return rng.choices([1, 4, 5, 6, 7], weights=[95, 3, 0.6, 0.6, 0.8])[0], community
+
+
+def pick_caste(rng, religion_id):
+    return rng.choices([1, 2, 3, 4, 5, 6],
+                       weights=CASTE_BY_RELIGION.get(religion_id, CASTE_DEFAULT))[0]
+
+
+def pick_occupation(rng, age, gender, arch):
+    """Occupation conditioned on age, gender and how urban the district is.
+
+    Previously these were independent draws, which produced male homemakers, retired
+    19-year-olds, and as many IT professionals in Yadgir as in Bengaluru.
+    """
+    # index:      1farm 2wage 3priv 4govt 5busi 6stud 7home 8driv 9it 10unemp 11ret 12oth
+    if age < 23:
+        w = [4, 8, 10, 0.5, 3, 55, 6, 2, 4, 6, 0, 1]
+    elif age >= 60:
+        w = [26, 8, 3, 2, 10, 0, 18, 1, 0.5, 3, 27, 2]
+    else:
+        w = [20, 16, 18, 7, 14, 1, 12, 6, 6, 4, 0.5, 1]
+
+    if gender == GENDER_F:
+        w = [v * m for v, m in zip(w, [0.7, 0.8, 0.9, 0.9, 0.5, 1.1, 6.0,
+                                       0.05, 0.7, 0.8, 0.7, 1.0])]
+    else:
+        # "Homemaker" is recorded for men only very rarely; driving and manual labour skew
+        # the other way.
+        w = [v * m for v, m in zip(w, [1.1, 1.15, 1.0, 1.0, 1.2, 1.0, 0.02,
+                                       1.4, 1.1, 1.1, 1.1, 1.0])]
+    if arch == "metro":
+        w = [v * m for v, m in zip(w, [0.05, 0.8, 2.0, 1.2, 1.3, 1.2, 0.9,
+                                       1.6, 6.0, 1.1, 0.9, 1.0])]
+    elif arch == "urban":
+        w = [v * m for v, m in zip(w, [0.35, 0.9, 1.5, 1.1, 1.2, 1.1, 1.0,
+                                       1.3, 2.0, 1.0, 1.0, 1.0])]
+    elif arch == "rural":
+        w = [v * m for v, m in zip(w, [1.9, 1.2, 0.5, 0.8, 0.8, 0.9, 1.1,
+                                       0.7, 0.04, 0.9, 1.0, 1.0])]
+    return rng.choices([o[0] for o in OCCUPATIONS], weights=w)[0]
+
+
+def pick_community(rng, region):
+    w = REGION_COMMUNITY_W[region]
+    return rng.choices(list(w.keys()), weights=list(w.values()))[0]
+
+
+def make_name(gender_id, rng, used=None, region="south", community=None):
+    """A community- and region-coherent Karnataka name.
+
+    Uniqueness matters beyond cosmetics: analytics resolve an accused across FIRs by
+    (AccusedName, GenderID) alone, so two distinct people sharing a name would silently
+    merge into one offender and fabricate cross-district links. Callers that mint durable
+    identities MUST pass `used`; the shape variety below exists partly to keep that
+    namespace wide enough to stay collision-free at demo scale.
+    """
+    community = community or pick_community(rng, region)
+    key = "f" if gender_id == GENDER_F else "m"
+    givens = NAMES[community][key]
+    fathers = NAMES[community]["m"]
+    surnames = SURNAMES[community][region]
+
+    for _ in range(60):
+        shape = rng.random()
+        given = rng.choice(givens)
+        if shape < 0.34:
+            name = "{} {}".format(given, rng.choice(surnames))
+        elif shape < 0.62:
+            # given + father's given + surname — the full form used on a charge sheet
+            name = "{} {} {}".format(given, rng.choice(fathers), rng.choice(surnames))
+        elif shape < 0.82:
+            # village/father initial prefix, e.g. "K. Manjunath Gowda"
+            name = "{}. {} {}".format(rng.choice("BCDGHKLMNPRSTVY"), given,
+                                      rng.choice(surnames))
+        elif shape < 0.93:
+            # double initial then given name — very common in south Karnataka records
+            name = "{}. {}. {}".format(rng.choice("BCDGHKLMNPRSTVY"),
+                                       rng.choice("BCDGHKLMNPRSTVY"), given)
+        else:
+            # given name followed by a trailing initial, no surname
+            name = "{} {}.".format(given, rng.choice("BCDGHKLMNPRSTVY"))
         if used is None:
             return name
         if name not in used:
             used.add(name)
             return name
     return name  # extremely unlikely fallback: allow a collision
+
+
+# Opening sentence of BriefFacts, varied by crime head so 20k narratives don't read as one
+# template. {d}=date, {t}=time, {s}=station, {D}=district, {n}=sub-head name.
+NARRATIVES = {
+    1: [  # crimes against body
+        "On {d} at about {t} hrs, a case of {n} was reported within the limits of {s}, {D} district.",
+        "On {d} at about {t} hrs, information was received at {s}, {D} district regarding an incident of {n}.",
+        "A complaint of {n} was lodged at {s}, {D} district in respect of an incident that occurred on {d} at about {t} hrs.",
+    ],
+    2: [  # property
+        "On {d} at about {t} hrs, unknown persons committed {n} within the limits of {s}, {D} district.",
+        "On {d} at about {t} hrs, a case of {n} was reported at {s}, {D} district; property was removed from the spot.",
+        "The complainant reported at {s}, {D} district that {n} took place on {d} at about {t} hrs.",
+    ],
+    3: [  # crimes against women
+        "On {d} at about {t} hrs, a complaint of {n} was received at {s}, {D} district.",
+        "A written complaint alleging {n} was submitted at {s}, {D} district concerning events of {d} at about {t} hrs.",
+    ],
+    5: [  # cyber
+        "The complainant reported at {s}, {D} district that on {d} at about {t} hrs they were defrauded through an online transaction ({n}).",
+        "On {d} at about {t} hrs, a case of {n} was reported at {s}, {D} district following an electronic communication received by the complainant.",
+    ],
+    6: [  # public order
+        "On {d} at about {t} hrs, a case of {n} was registered on police report within the limits of {s}, {D} district.",
+        "On {d} at about {t} hrs, staff of {s}, {D} district on patrol duty came across an incident of {n}.",
+    ],
+    7: [  # special & local laws
+        "On {d} at about {t} hrs, staff of {s}, {D} district acting on credible information detected a case of {n}.",
+        "On {d} at about {t} hrs, during a raid conducted within the limits of {s}, {D} district, a case of {n} was booked.",
+    ],
+}
+NARRATIVE_DEFAULT = [
+    "On {d} at about {t} hrs, a case of {n} was reported within the limits of {s}, {D} district.",
+    "On {d} at about {t} hrs, a report of {n} was received at {s}, {D} district.",
+]
+
+
+def narrative_opening(rng, sub, inc_from, station_name, district_name):
+    templates = NARRATIVES.get(sub["head"], NARRATIVE_DEFAULT)
+    return rng.choice(templates).format(
+        d=inc_from.strftime("%d-%m-%Y"), t=inc_from.strftime("%H:%M"),
+        s=station_name, D=district_name, n=sub["name"])
+
+
+def era_act_section(act, sec, incident_dt):
+    """Map a canonical (IPC/CrPC) citation onto the code in force when the offence was
+    committed. SUB_HEADS declare IPC/CrPC sections; offences on or after 01-07-2024 are
+    charged under the BNS/BNSS equivalent instead. Other statutes are unaffected."""
+    if incident_dt < BNS_CUTOVER:
+        return act, sec
+    if act == "IPC" and sec in IPC_TO_BNS:
+        return "BNS", IPC_TO_BNS[sec]
+    if act == "CRPC" and sec in CRPC_TO_BNSS:
+        return "BNSS", CRPC_TO_BNSS[sec]
+    return act, sec
 
 
 def fmt_dt(dt):
@@ -460,16 +1016,18 @@ def build_geo_org(rng):
         did += 1
         districts.append({"DistrictID": did, "DistrictName": name, "StateID": ka_state_id, "Active": 1})
         weight = (pop / 1_000_000.0) * ARCHETYPE_PROPENSITY[arch]
-        district_meta[did] = dict(name=name, lat=lat, lon=lon, pop=pop, arch=arch, weight=weight)
+        district_meta[did] = dict(name=name, lat=lat, lon=lon, pop=pop, arch=arch,
+                                  weight=weight, region=DISTRICT_REGION.get(name, "south"))
 
         uid += 1
         units.append({"UnitID": uid, "UnitName": f"District Police Office, {name}",
                       "TypeID": 2, "ParentUnit": hq_unit, "NationalityID": 1,
                       "StateID": ka_state_id, "DistrictID": did, "Active": 1})
         dpo_unit = uid
+        district_meta[did]["dpo_unit"] = dpo_unit
 
-        n_st = max(3, N_STATIONS[arch] + rng.randint(-1, 1))
-        n_circles = max(1, n_st // 4)
+        roster = KA_STATIONS[name]
+        n_circles = max(1, len(roster) // 6)
         circle_ids = []
         for c in range(n_circles):
             uid += 1
@@ -477,31 +1035,47 @@ def build_geo_org(rng):
                           "TypeID": 3, "ParentUnit": dpo_unit, "NationalityID": 1,
                           "StateID": ka_state_id, "DistrictID": did, "Active": 1})
             circle_ids.append(uid)
+        district_meta[did]["circle_units"] = circle_ids
 
         stations_by_district[did] = []
-        for s in range(n_st):
+        for s, (sname, slat, slon, sweight) in enumerate(roster):
             uid += 1
-            slat, slon = jitter(lat, 12, rng), jitter(lon, 12, rng)
-            hotcells = [(jitter(slat, 4, rng), jitter(slon, 4, rng))
-                        for _ in range(rng.randint(1, 2))]
-            units.append({"UnitID": uid, "UnitName": f"{name} Police Station {s + 1}",
+            # Hot cells are the recurring trouble spots inside a beat — a market, a bus
+            # stand, a bar strip. Tight jitter keeps them as identifiable clusters.
+            hotcells = [scatter(slat, slon, 1.8, rng) for _ in range(rng.randint(1, 3))]
+            units.append({"UnitID": uid, "UnitName": sname,
                           "TypeID": 4, "ParentUnit": circle_ids[s % n_circles],
                           "NationalityID": 1, "StateID": ka_state_id, "DistrictID": did,
                           "Active": 1})
-            station_meta[uid] = dict(district_id=did, name=f"{name} Police Station {s + 1}",
-                                     lat=slat, lon=slon, hotcells=hotcells)
+            station_meta[uid] = dict(district_id=did, name=sname, lat=slat, lon=slon,
+                                     hotcells=hotcells, weight=sweight)
             stations_by_district[did].append(uid)
             eid_units.append(uid)
 
-        # two courts per district: Sessions + JMFC
+        # Courts: Sessions + numbered magistrate courts, scaled to district size, plus the
+        # special courts that actually try NDPS and POCSO matters.
         cid += 1
         courts.append({"CourtID": cid, "CourtName": f"Principal District & Sessions Court, {name}",
                        "DistrictID": did, "StateID": ka_state_id, "Active": 1})
-        sessions_court = cid
-        cid += 1
-        courts.append({"CourtID": cid, "CourtName": f"JMFC Court, {name}",
-                       "DistrictID": did, "StateID": ka_state_id, "Active": 1})
-        courts_by_district[did] = [(sessions_court, "sessions"), (cid, "jmfc")]
+        entries = [(cid, "sessions")]
+        n_magistrate = max(1, min(6, len(roster) // 6))
+        for m in range(n_magistrate):
+            cid += 1
+            if arch == "metro":
+                label = f"{ROMAN[m]} Addl. Chief Metropolitan Magistrate Court, {name}"
+            elif m == 0:
+                label = f"JMFC Court, {name}"
+            else:
+                label = f"{ROMAN[m]} Addl. JMFC Court, {name}"
+            courts.append({"CourtID": cid, "CourtName": label, "DistrictID": did,
+                           "StateID": ka_state_id, "Active": 1})
+            entries.append((cid, "jmfc"))
+        for special in ("Special Court for NDPS Cases", "Special Court under POCSO Act"):
+            cid += 1
+            courts.append({"CourtID": cid, "CourtName": f"{special}, {name}",
+                           "DistrictID": did, "StateID": ka_state_id, "Active": 1})
+            entries.append((cid, "special"))
+        courts_by_district[did] = entries
 
     # neighbour-state districts (arrest destinations only)
     for sidx, (sname, dnames) in enumerate(NEIGHBOUR_STATES, start=2):
@@ -515,8 +1089,8 @@ def build_geo_org(rng):
             stations_by_district, courts_by_district, neighbour_district_ids)
 
 
-def build_employees(rng, station_meta, ref_year):
-    """SHO + IOs + writers per station, an SP per district."""
+def build_employees(rng, station_meta, district_meta, ref_year):
+    """SHO + IOs + writers per station, plus a district command element per district."""
     employees = []
     eid = 0
     used_kgid = set()
@@ -525,35 +1099,56 @@ def build_employees(rng, station_meta, ref_year):
     districts_seen = set()
     for unit_id, meta in station_meta.items():
         did = meta["district_id"]
+        dmeta = district_meta[did]
+        region = dmeta["region"]
         if did not in districts_seen:
             districts_seen.add(did)
+            # District command sits at the District Police Office, not at a station. A
+            # commissionerate is headed by a Commissioner with DCPs under him; a district
+            # by an SP with DySPs. Both are posted to the DPO unit.
+            metro = dmeta["arch"] == "metro"
+            head_rank, head_desig = (10, 7) if metro else (3, 4)
+            depu_rank, depu_desig = (11, 8) if metro else (4, 9)
             eid += 1
-            employees.append(_employee(rng, eid, did, unit_id, rank=3, desig=4,
-                                       ref_year=ref_year, used=used_kgid))
+            employees.append(_employee(rng, eid, did, dmeta["dpo_unit"], rank=head_rank,
+                                       desig=head_desig, ref_year=ref_year, used=used_kgid,
+                                       region=region))
+            eid += 1
+            employees.append(_employee(rng, eid, did, dmeta["dpo_unit"], rank=depu_rank,
+                                       desig=depu_desig, ref_year=ref_year, used=used_kgid,
+                                       region=region))
+            # One Police Inspector heads each circle.
+            for circle_unit in dmeta["circle_units"]:
+                eid += 1
+                employees.append(_employee(rng, eid, did, circle_unit, rank=5, desig=3,
+                                           ref_year=ref_year, used=used_kgid, region=region))
         # SHO — Inspector or PSI
         eid += 1
         employees.append(_employee(rng, eid, did, unit_id, rank=rng.choice([5, 5, 6]),
-                                   desig=1, ref_year=ref_year, used=used_kgid))
+                                   desig=1, ref_year=ref_year, used=used_kgid, region=region))
         sho_by_station[unit_id] = eid
         # IOs — PSI/ASI
         ios = []
         for _ in range(rng.randint(2, 4)):
             eid += 1
             employees.append(_employee(rng, eid, did, unit_id, rank=rng.choice([6, 6, 7]),
-                                       desig=2, ref_year=ref_year, used=used_kgid))
+                                       desig=2, ref_year=ref_year, used=used_kgid,
+                                       region=region))
             ios.append(eid)
         ios_by_station[unit_id] = ios
         # station writer + beat constables
         for desig, rank in ((5, 8), (6, 9)):
             eid += 1
             employees.append(_employee(rng, eid, did, unit_id, rank=rank, desig=desig,
-                                       ref_year=ref_year, used=used_kgid))
+                                       ref_year=ref_year, used=used_kgid, region=region))
     return employees, sho_by_station, ios_by_station
 
 
-def _employee(rng, eid, district_id, unit_id, rank, desig, ref_year, used):
+def _employee(rng, eid, district_id, unit_id, rank, desig, ref_year, used, region="south"):
     gender = GENDER_F if rng.random() < 0.12 else GENDER_M
-    first = rng.choice(FIRST_NAMES_F if gender == GENDER_F else FIRST_NAMES_M)
+    # The ERD gives Employee a single FirstName column; a real KSP roster records the full
+    # name there (e.g. "Manjunath B Hiremath"), not a bare given name.
+    first = make_name(gender, rng, region=region)
     dob_year = ref_year - rng.randint(28, 56)
     dob = datetime(dob_year, rng.randint(1, 12), rng.randint(1, 28))
     appt = dob + timedelta(days=365 * rng.randint(21, 26) + rng.randint(0, 300))
@@ -571,26 +1166,38 @@ def _employee(rng, eid, district_id, unit_id, rank, desig, ref_year, used):
 
 
 # ======================================================== offender pool ======
-def build_offender_pool(rng, n_pool, district_ids):
+def build_offender_pool(rng, n_pool, district_ids, district_meta, district_weights):
     """Identity pool for accused. ~12% are habitual and recur across cases; habitual
     offenders also cluster into small 'gangs' that co-offend (network structure)."""
     used_names = set()
     pool = []
     for i in range(n_pool):
-        gender = GENDER_F if rng.random() < 0.10 else GENDER_M
+        gender = GENDER_F if rng.random() < 0.14 else GENDER_M
+        # Home district is drawn on the same population/archetype weights as cases, so
+        # offender supply tracks case volume. Spreading the pool uniformly instead would
+        # leave Bengaluru City's ~130 local offenders carrying 5,500 cases between them.
+        home = rng.choices(district_ids, weights=district_weights)[0]
         pool.append(dict(
-            name=make_name(gender, rng, used_names),
+            name=make_name(gender, rng, used_names, region=district_meta[home]["region"]),
             gender=gender,
             birth_year_offset=rng.gauss(0, 1),   # scaled per sub-head at use time
-            home_district=rng.choice(district_ids),
+            birth_year=None,                     # fixed on first appearance; see build_cases
+            home_district=home,
         ))
     habitual = rng.sample(range(n_pool), max(1, int(n_pool * 0.12)))
+    # Gangs form among habitual offenders who live in the same district. A gang whose
+    # members are scattered across the state is not a gang — co-offending is local, and
+    # building it that way is what makes the community detection findable rather than noise.
+    by_home = collections.defaultdict(list)
+    for i in habitual:
+        by_home[pool[i]["home_district"]].append(i)
     gangs = []
-    hs = habitual[:]
-    rng.shuffle(hs)
-    while len(hs) >= 2:
-        size = min(len(hs), rng.choices([2, 3, 4, 5], weights=[35, 35, 20, 10])[0])
-        gangs.append([hs.pop() for _ in range(size)])
+    for members in by_home.values():
+        hs = members[:]
+        rng.shuffle(hs)
+        while len(hs) >= 2:
+            size = min(len(hs), rng.choices([2, 3, 4, 5], weights=[35, 35, 20, 10])[0])
+            gangs.append([hs.pop() for _ in range(size)])
     return pool, habitual, gangs
 
 
@@ -633,7 +1240,10 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
     sho_by_station, ios_by_station = employees_ctx
     pool, habitual, gangs = pool_ctx
 
-    now = datetime.now().replace(minute=0, second=0, microsecond=0)
+    if args.end_date:
+        now = datetime.strptime(args.end_date, "%Y-%m-%d").replace(hour=23)
+    else:
+        now = datetime.now().replace(minute=0, second=0, microsecond=0)
     days, cum_gen, cum_ris = build_day_curves(args.days, now, rng)
 
     sub_by_id = {s["id"]: s for s in SUB_HEADS}
@@ -646,6 +1256,23 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
         arch = district_meta[did]["arch"]
         district_sub_weights[did] = [s["w"] * s["mix"].get(arch, 1.0) for s in SUB_HEADS]
 
+    # Station load weights within each district, and an inverse-distance table used to place
+    # out-of-district arrests near the case district rather than uniformly across the state.
+    station_weights = {
+        did: [station_meta[s]["weight"] for s in stations_by_district[did]]
+        for did in district_ids
+    }
+    nearby_ids, nearby_weights = {}, {}
+    for did in district_ids:
+        a = district_meta[did]
+        others = [o for o in district_ids if o != did]
+        nearby_ids[did] = others
+        nearby_weights[did] = [
+            1.0 / (0.5 + (district_meta[o]["lat"] - a["lat"]) ** 2
+                   + (district_meta[o]["lon"] - a["lon"]) ** 2)
+            for o in others
+        ]
+
     # emerging spike: one weighted district, chain snatching surge in the last 30 days
     spike_district = rng.choices(district_ids, weights=district_weights)[0]
     spike_sub = 10  # Chain Snatching
@@ -654,6 +1281,19 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
     for g in gangs:
         for m in g:
             gang_of[m] = g
+
+    pool_male = [i for i, p in enumerate(pool) if p["gender"] == GENDER_M]
+    pool_female = [i for i, p in enumerate(pool) if p["gender"] == GENDER_F]
+
+    # Offenders are indexed by home district and gender so a case draws from people who
+    # actually live in that jurisdiction. Without this an offender accumulates cases in
+    # 18 districts at once, which reads as a name collision rather than a career criminal.
+    local_pool = collections.defaultdict(lambda: {GENDER_M: [], GENDER_F: []})
+    for i, p in enumerate(pool):
+        local_pool[p["home_district"]][p["gender"]].append(i)
+    local_habitual = collections.defaultdict(list)
+    for i in habitual:
+        local_habitual[pool[i]["home_district"]].append(i)
 
     case_rows, complainant_rows, victim_rows, accused_rows = [], [], [], []
     assoc_rows, arrest_rows, cs_rows = [], [], []
@@ -680,15 +1320,19 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
         if info_dt > now:
             info_dt = now - timedelta(hours=rng.uniform(1, 24))
         reg_date = info_dt + (timedelta(days=1) if rng.random() < 0.08 else timedelta(0))
+        # An FIR cannot be registered in the future — the overnight slip above can otherwise
+        # push the last day's cases past the end of the window.
+        if reg_date > now:
+            reg_date = now
 
         # --- where ---
-        station = rng.choice(stations_by_district[did])
+        station = rng.choices(stations_by_district[did], weights=station_weights[did])[0]
         smeta = station_meta[station]
         if rng.random() < 0.65 and smeta["hotcells"]:
             hlat, hlon = rng.choice(smeta["hotcells"])
-            lat, lon = jitter(hlat, 1.2, rng), jitter(hlon, 1.2, rng)
+            lat, lon = scatter(hlat, hlon, 0.7, rng)
         else:
-            lat, lon = jitter(smeta["lat"], 5, rng), jitter(smeta["lon"], 5, rng)
+            lat, lon = scatter(smeta["lat"], smeta["lon"], 2.5, rng)
 
         # --- category ---
         if sub["id"] == 25:
@@ -707,6 +1351,9 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
         serial = serials[key]
         crime_no = f"{CATEGORY_CODE[category]}{did:04d}{station:04d}{year:04d}{serial:05d}"
         case_no = f"{year:04d}{serial:05d}"
+        # How the number is actually written and spoken at a station ("FIR No. 123/2026").
+        # CrimeNo/CaseNo keep the ERD-mandated machine format; this is narrative only.
+        display_no = f"{serial}/{year}"
 
         gravity_id = 1 if rng.random() < sub["heinous"] else 2
         case_age_days = (now - reg_date).days
@@ -715,18 +1362,39 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
         n_acc = rng.choices([0, 1, 2, 3], weights=sub["acc_n"])[0]
         acc_pool_ids = []
         if n_acc:
-            if rng.random() < 0.30 and habitual:
-                seed_off = rng.choice(habitual)
+            local_hab = local_habitual.get(did) or habitual
+            if rng.random() < 0.30 and local_hab:
+                seed_off = rng.choice(local_hab)
                 gang = gang_of.get(seed_off, [seed_off])
                 picks = [seed_off] + [m for m in gang if m != seed_off]
                 acc_pool_ids = picks[:n_acc]
-                while len(acc_pool_ids) < n_acc:
-                    extra = rng.randrange(len(pool))
+                # Pad a short gang from the same district, not from anywhere in the state —
+                # otherwise every cluster acquires members from five districts and the
+                # community view stops looking like a local crew.
+                pad = local_pool[did][GENDER_M] or list(range(len(pool)))
+                guard = 0
+                while len(acc_pool_ids) < n_acc and guard < 40:
+                    guard += 1
+                    extra = rng.choice(pad)
                     if extra not in acc_pool_ids:
                         acc_pool_ids.append(extra)
             else:
-                while len(acc_pool_ids) < n_acc:
-                    p = rng.randrange(len(pool))
+                # Draw from the gender-matched half of the pool rather than flipping an
+                # identity's gender at emit time. Analytics resolve a person by
+                # (name, gender), so overriding gender per case splits one offender into
+                # two and silently destroys the co-accused links between their FIRs.
+                want = GENDER_F if rng.random() < sub["afem"] else GENDER_M
+                # Mostly local offenders; a minority travel, which is what makes a genuine
+                # cross-jurisdiction link worth flagging on the network page.
+                if rng.random() < 0.85 and local_pool[did][want]:
+                    bucket = local_pool[did][want]
+                else:
+                    bucket = (pool_female if want == GENDER_F else pool_male) or \
+                        list(range(len(pool)))
+                guard = 0
+                while len(acc_pool_ids) < n_acc and guard < 40:
+                    guard += 1
+                    p = rng.choice(bucket)
                     if p not in acc_pool_ids:
                         acc_pool_ids.append(p)
 
@@ -734,11 +1402,17 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
         for order, pidx in enumerate(acc_pool_ids, start=1):
             ident = pool[pidx]
             acc_id += 1
-            age = gauss_int(rng, sub["acc"][0] + ident["birth_year_offset"] * sub["acc"][1] * 0.6,
-                            3, 15, 78)
+            # Age is fixed to the identity, not redrawn per FIR: the first case an identity
+            # appears in sets an implied birth year (from that crime's age profile), and
+            # every later FIR ages them forward from it. Otherwise the same offender shows a
+            # different age in each of their own cases.
+            if ident["birth_year"] is None:
+                first_age = gauss_int(
+                    rng, sub["acc"][0] + ident["birth_year_offset"] * sub["acc"][1] * 0.6,
+                    3, 15, 78)
+                ident["birth_year"] = inc_from.year - first_age
+            age = max(12, min(90, inc_from.year - ident["birth_year"]))
             gender = ident["gender"]
-            if sub["afem"] > 0.3 and rng.random() < 0.5:
-                gender = GENDER_F
             accused_rows.append({
                 "AccusedMasterID": acc_id, "CaseMasterID": case_id,
                 "AccusedName": ident["name"], "AgeYear": age,
@@ -774,8 +1448,16 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
             cs_rows.append({"CSID": cs_id, "CaseMasterID": case_id,
                             "csdate": fmt_dt(cs_dt), "cstype": cstype, "PolicePersonID": io})
             if cstype == "A":
-                kind = "sessions" if gravity_id == 1 else "jmfc"
-                court_id = next(c for c, k in courts_by_district[did] if k == kind)
+                # NDPS and POCSO matters go to their special courts; heinous offences are
+                # committed to Sessions; the rest are spread across the magistrate courts.
+                if sub["id"] == 22:
+                    kind = "special"
+                elif gravity_id == 1:
+                    kind = "sessions"
+                else:
+                    kind = "jmfc"
+                bench = [c for c, k in courts_by_district[did] if k == kind]
+                court_id = rng.choice(bench)
                 since_cs = (now - cs_dt).days
                 if since_cs > 400:
                     status_id = rng.choices([4, 5, 3], weights=[38, 22, 40])[0]
@@ -804,16 +1486,22 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
             if roll < 0.80:
                 a_state, a_district = 1, did
             elif roll < 0.96:
-                a_state, a_district = 1, rng.choice(list(district_meta.keys()))
+                # An absconding accused is picked up a district or two away far more often
+                # than across the state, so weight the draw by proximity.
+                a_state, a_district = 1, rng.choices(
+                    nearby_ids[did], weights=nearby_weights[did])[0]
             else:
                 a_state = rng.randrange(2, 2 + len(NEIGHBOUR_STATES))
                 a_district = rng.choice(neighbour_district_ids[a_state])
+            # The accused is produced before the jurisdictional magistrate, not the Sessions
+            # judge — remand is a magistrate's function.
+            magistrate = [c for c, k in courts_by_district[did] if k == "jmfc"]
             arrest_rows.append({
                 "ArrestSurrenderID": arr_id, "CaseMasterID": case_id,
                 "ArrestSurrenderTypeID": arr_type, "ArrestSurrenderDate": fmt_d(arr_dt),
                 "ArrestSurrenderStateId": a_state, "ArrestSurrenderDistrictId": a_district,
                 "PoliceStationID": station, "IOID": io,
-                "CourtID": courts_by_district[did][1][0],
+                "CourtID": rng.choice(magistrate),
                 "AccusedMasterID": acc_master_id,
                 "IsAccused": 1 if order == 1 else 0,
                 "IsComplainantAccused": 1 if rng.random() < 0.01 else 0,
@@ -828,7 +1516,7 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
             if rng.random() < 0.005:
                 v_gender = GENDER_T
             v_age = gauss_int(rng, sub["vic"][0], sub["vic"][1], 3, 92)
-            v_name = make_name(v_gender, rng)
+            v_name = make_name(v_gender, rng, region=meta["region"])
             victim_names.append(v_name)
             victim_rows.append({
                 "VictimMasterID": vic_id, "CaseMasterID": case_id,
@@ -847,41 +1535,49 @@ def build_cases(args, rng, geo, employees_ctx, pool_ctx):
             else:
                 c_gender = GENDER_F if rng.random() < 0.30 else GENDER_M
                 c_age = gauss_int(rng, 41, 13, 18, 85)
-                c_name = make_name(c_gender, rng, used_comp_names)
+                c_name = make_name(c_gender, rng, used_comp_names, region=meta["region"])
+            religion_id, _ = pick_religion(rng, meta["region"])
             complainant_rows.append({
                 "ComplainantID": comp_id, "CaseMasterID": case_id,
                 "ComplainantName": c_name, "AgeYear": c_age,
-                "OccupationID": rng.choices([o[0] for o in OCCUPATIONS], weights=OCCUPATION_W)[0],
-                "ReligionID": rng.choices([r[0] for r in RELIGIONS], weights=RELIGION_W)[0],
-                "CasteID": rng.choices([c[0] for c in CASTES], weights=CASTE_W)[0],
+                "OccupationID": pick_occupation(rng, c_age, c_gender, meta["arch"]),
+                "ReligionID": religion_id,
+                "CasteID": pick_caste(rng, religion_id),
                 "GenderID": c_gender,
             })
 
         # --- act-section associations ---
         act_order = {}
         sec_no = 0
+        primary_cited = []
         for act, sec in sub["secs"]:
+            act, sec = era_act_section(act, sec, inc_from)
             sec_no += 1
             act_order.setdefault(act, len(act_order) + 1)
+            primary_cited.append((act, sec))
             assoc_rows.append({"CaseMasterID": case_id, "ActID": act, "SectionID": sec,
                                "ActOrderID": act_order[act], "SectionOrderID": sec_no})
         for prob, (act, sec) in sub.get("extra", []):
             if rng.random() < prob:
+                act, sec = era_act_section(act, sec, inc_from)
                 sec_no += 1
                 act_order.setdefault(act, len(act_order) + 1)
                 assoc_rows.append({"CaseMasterID": case_id, "ActID": act, "SectionID": sec,
                                    "ActOrderID": act_order[act], "SectionOrderID": sec_no})
 
         # --- brief facts ---
-        sec_str = ", ".join(f"{a} {s}" for a, s in sub["secs"])
+        # NOTE: the " Victim: …" and " Accused: …" spans are a privacy contract with
+        # backend/app/routers/assistant.py::_redact, which strips them before any text
+        # reaches the LLM. Keep their shape (name, then "(age/G)." for the victim) stable —
+        # only the surrounding narrative varies.
+        sec_str = ", ".join(f"{a} {s}" for a, s in primary_cited)
         vic_str = (f" Victim: {victim_names[0]} ({victim_rows[-n_vic]['AgeYear']}/"
                    f"{'MFT'[victim_rows[-n_vic]['GenderID'] - 1]})." if n_vic else "")
         acc_str = (f" Accused: {', '.join(pool[p]['name'] for _, p, _ in case_accused)}."
                    if case_accused else " Accused unknown at registration.")
-        brief = (f"On {inc_from.strftime('%d-%m-%Y')} at about {inc_from.strftime('%H:%M')} hrs, "
-                 f"a case of {sub['name']} ({sec_str}) occurred within the limits of "
-                 f"{smeta['name']}, {meta['name']} district.{vic_str}{acc_str} "
-                 f"Case registered as {category} No. {case_no}.")
+        brief = (f"{narrative_opening(rng, sub, inc_from, smeta['name'], meta['name'])} "
+                 f"Offence u/s {sec_str}.{vic_str}{acc_str} "
+                 f"Case registered as {category} No. {display_no}.")
 
         case_rows.append({
             "CaseMasterID": case_id, "CrimeNo": crime_no, "CaseNo": case_no,
@@ -911,8 +1607,12 @@ def main():
     ap = argparse.ArgumentParser(description="Generate synthetic Police FIR data per the ERD.")
     ap.add_argument("--cases", type=int, default=20000)
     ap.add_argument("--pool", type=int, default=4000, help="accused identity pool size")
-    ap.add_argument("--days", type=int, default=730, help="history window in days")
+    ap.add_argument("--days", type=int, default=1095, help="history window in days")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--end-date", dest="end_date", default=None,
+                    help="last day of the history window as YYYY-MM-DD (default: today). "
+                         "Pin this to make a run reproducible — without it the window "
+                         "slides with the wall clock and the same seed gives new dates.")
     default_out = os.path.join(os.path.dirname(__file__), "..", "output")
     ap.add_argument("--out", default=default_out)
     args = ap.parse_args()
@@ -924,9 +1624,14 @@ def main():
     (states, districts, units, courts, district_meta, station_meta,
      stations_by_district, courts_by_district, neighbour_district_ids) = geo
 
+    ref_year = (datetime.strptime(args.end_date, "%Y-%m-%d").year if args.end_date
+                else datetime.now().year)
     employees, sho_by_station, ios_by_station = build_employees(
-        rng, station_meta, ref_year=datetime.now().year)
-    pool, habitual, gangs = build_offender_pool(rng, args.pool, list(district_meta.keys()))
+        rng, station_meta, district_meta, ref_year=ref_year)
+    _dids = list(district_meta.keys())
+    pool, habitual, gangs = build_offender_pool(
+        rng, args.pool, _dids, district_meta,
+        [district_meta[d]["weight"] for d in _dids])
 
     (case_rows, complainant_rows, victim_rows, accused_rows, assoc_rows,
      arrest_rows, cs_rows, spike_district, spike_sub) = build_cases(

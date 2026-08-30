@@ -332,10 +332,14 @@ export default function Hotspots() {
                       <BarChart
                         data={(station.data?.stations ?? []).slice(0, 8).map((s) => ({
                           ...s,
-                          // Drop the redundant leading district name (we're already drilled
-                          // into that district) so the station label doesn't get clipped
-                          // against the axis — e.g. "Belagavi Police Station 3" -> "Police Station 3".
-                          station: selected && s.station.startsWith(selected) ? s.station.slice(selected.length).trim() : s.station,
+                          // Station names carry a redundant " PS" suffix, and a few are
+                          // disambiguated by a parenthesised district ("Ashok Nagar PS
+                          // (Kalaburagi)") that is redundant once drilled into that
+                          // district. Strip both so the label fits against the axis.
+                          station: s.station
+                            .replace(/\s*\([^)]*\)\s*$/, "")
+                            .replace(/\s+PS$/, "")
+                            .trim(),
                         }))}
                         layout="vertical"
                         margin={{ left: 8, right: 16, top: 4, bottom: 4 }}

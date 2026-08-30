@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 
-from app.services import firdata, mo
+from app.services import aggregations, firdata, mo
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -155,7 +155,11 @@ def person_profile(person_id: str):
     sections = Counter(s for c in crimes for s in c["sections"])
 
     # threat heuristic (transparent): gravity mix + recency + arrest pressure
-    recent_cut = (datetime.now() - timedelta(days=90)).strftime("%Y-%m")
+    # Recency is measured against the latest incident in the data, not the wall clock —
+    # every other recency window in the app uses that reference, and on a dataset whose
+    # last incident predates today the wall clock silently zeroes this term for everyone.
+    recent_cut = (aggregations._ref_now(firdata.cases())
+                  - timedelta(days=90)).strftime("%Y-%m")
     recent = sum(v for m, v in months.items() if m >= recent_cut)
     raw = heinous * 9 + (len(crimes) - heinous) * 2.5 + recent * 6 + len(adj.get(person_id, {})) * 2
     threat_score = max(0, min(100, round(raw)))

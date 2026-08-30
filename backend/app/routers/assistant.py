@@ -69,14 +69,17 @@ def _aggregate_context(question: str) -> list[str]:
         ctx += _network_context()
     return ctx
 
-# BriefFacts is machine-generated from a fixed template (see data/generator/
-# generate_synthetic.py) that always renders victim/accused identity as
-# " Victim: <name> (<age>/<gender>)." and " Accused: <name(s)>." — strip those spans
-# before any FIR narrative leaves the server as LLM context or a UI-visible answer.
-# Even on synthetic data, a policing tool echoing names verbatim into an ungated
-# "ask anything" endpoint is a habit not worth normalizing.
-_VICTIM_RE = re.compile(r"Victim: [^.]+\.")
-_ACCUSED_RE = re.compile(r"Accused(?: unknown at registration)?: [^.]*\.")
+# BriefFacts is machine-generated (see data/generator/generate_synthetic.py) and always
+# renders victim/accused identity as " Victim: <name> (<age>/<gender>)." and
+# " Accused: <name(s)>." — strip those spans before any FIR narrative leaves the server as
+# LLM context or a UI-visible answer. Even on synthetic data, a policing tool echoing names
+# verbatim into an ungated "ask anything" endpoint is a habit not worth normalizing.
+#
+# These anchor on the *structure* around the name rather than on the name itself: Karnataka
+# names legitimately contain full stops ("C. R. Yusuf", "Nagendra P."), so the earlier
+# "[^.]+" form stopped at the first initial and leaked the rest of the name.
+_VICTIM_RE = re.compile(r"Victim: .*?\(\d{1,3}/[MFT]\)\.")
+_ACCUSED_RE = re.compile(r"Accused: .*?(?=\s+Case registered as\b|$)", re.S)
 
 
 def _redact(text: str) -> str:
